@@ -1,0 +1,20 @@
+[package]
+name = "aip-rs"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+description = "Runtime primitives for Google API Improvement Proposals: page tokens, ordering and resource names."
+repository = "https://github.com/protoc-contrib/aip-rs"
+keywords = ["aip", "grpc", "protobuf", "pagination"]
+categories = ["api-bindings"]
+
+# The crate is `aip-rs` because `aip` is taken on crates.io. Consumers rename
+# it back, so generated code reads `aip::PageToken`:
+#
+#     aip = { package = "aip-rs", version = "0.1" }
+[lib]
+name = "aip"
+
+[dependencies]
+
+[dev-dependencies]
