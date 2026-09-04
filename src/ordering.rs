@@ -81,7 +81,7 @@ impl OrderBy {
 
 impl OrderByField {
     /// Splits the field path into its segments.
-    pub fn sub_fields(&self) -> impl Iterator<Item = &str> {
+    pub fn segments(&self) -> impl Iterator<Item = &str> {
         self.path.split('.')
     }
 }
@@ -370,7 +370,7 @@ mod tests {
     fn splits_a_path_into_segments() {
         assert_eq!(
             field("book.author.name", false)
-                .sub_fields()
+                .segments()
                 .collect::<Vec<_>>(),
             ["book", "author", "name"]
         );
