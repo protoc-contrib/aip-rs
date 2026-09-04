@@ -36,6 +36,10 @@
 //! - AIP-132 ordering — [`OrderBy`]
 //! - AIP-158 pagination — [`PageToken`], [`CursorValue`]
 //!
+//! AIP-160 filtering is plain CEL, so the parser is whichever CEL crate the
+//! caller picked and this one contributes only the error type generated code
+//! reports with — see [`query`].
+//!
 //! # Names
 //!
 //! The crate is published as `aip-rs` because `aip` is taken on crates.io, but
@@ -52,10 +56,12 @@ mod wire;
 
 pub mod ordering;
 pub mod pagination;
+pub mod query;
 pub mod resource;
 
 pub use ordering::{OrderBy, OrderByField};
 pub use pagination::{CursorValue, PageToken};
+pub use query::QueryError;
 pub use resource::{ResourceName, ResourcePattern};
 
 // Not implemented here, deliberately:
