@@ -30,16 +30,20 @@ piece worth building first.
 nothing. The Go predecessor carried ~3,000 lines to parse AIP-160's
 CEL-*like* grammar; that grammar was dropped rather than ported.
 
-**Anything that walks a protobuf message.** Clearing `OUTPUT_ONLY` fields,
-validating `REQUIRED` fields and checking `update_mask` paths are all
-*generated* rather than done reflectively.
+**Mutating a protobuf message.** Clearing `OUTPUT_ONLY` fields is *generated*,
+because buffa 0.9.1 offers no reflective path to mutation at all:
 
-That split is the opposite of aip-go's, and deliberately so. Go's
-`protoreflect` offers direct field access, so the runtime could walk messages
-cheaply. `buffa`'s reflection is bridge mode — it encodes the message and
-decodes it into a `DynamicMessage`, a full round trip per access. Clearing
-output-only fields on every request that way would be absurd when the
-generator already knows the field list and can emit:
+```rust
+fn reflect(&self) -> ReflectCow<'_>;
+
+// `reflect_mut(&mut self) -> ReflectCowMut<'_>` is part of the design but
+// deferred to the MergeSink work [...]
+```
+
+`Reflectable` hands out an immutable handle in either reflect mode.
+`ReflectMessage::clear()` exists, but reaching it needs a
+`&mut dyn ReflectMessage` that nothing produces. So the generator emits the
+walk instead — which it can do well, knowing the field list at codegen time:
 
 ```rust
 impl Collection {
@@ -47,8 +51,22 @@ impl Collection {
 }
 ```
 
-So: message-shaped work is generated, and this crate holds only what is pure
-data manipulation — bytes, strings and time.
+Reads are a different matter. Validating `REQUIRED` fields, extracting a
+cursor and checking `update_mask` paths are all read-only, so they can live
+here and use `Reflectable` the way aip-go uses `protoreflect`. Revisit this
+if a buffa release lands `reflect_mut`.
+
+## Reflect mode is not this crate's concern
+
+buffa generates reflection in three modes — `Off`, `Bridge` (round-trips
+through a `DynamicMessage`; smaller code, an allocation and re-encode per
+call) and `VTable` (`impl ReflectMessage` directly; larger code, near-free
+access).
+
+Per buffa's own documentation, *"the call site is `foo.reflect().get(fd)`
+regardless of mode"*. So write against `Reflectable` and let the consuming
+template choose, by measuring generated-code size against per-request cost.
+It is one line in `buf.gen.yaml` and nothing here has to change.
 
 ## Consuming it
 
