@@ -32,7 +32,7 @@ A page token supports both AIP-158 styles. Use one per List method:
 
 | Field | Encoding |
 | --- | --- |
-| version | 1 byte, currently `0x01` |
+| version | 1 byte, `0x02` here and `0x01` in Go — see above |
 | offset | signed LEB128 varint (zigzag), as Go's `binary.PutVarint` |
 | request checksum | `u32`, **little-endian**, fixed 4 bytes |
 | cursor length | unsigned LEB128 varint |
@@ -86,30 +86,63 @@ A mismatch means the client changed `filter` or `order_by` mid-page. Return
 
 ## Test vectors
 
-Produced by the Go implementation. A conforming encoder must reproduce these
-exactly, and a conforming decoder must accept them.
+Originally produced by the Go implementation, then reissued with version byte
+`0x02`; every byte after the first is unchanged. Checksums are supplied here
+rather than computed from a request, so the vectors stay meaningful across
+implementations even though real checksums do not — see
+[Why not compatible](#why-not-compatible).
+
+A conforming encoder must reproduce these exactly, and a conforming decoder
+must accept them.
 
 | Token | Encoded |
 | --- | --- |
-| empty | `AQAAAAAAAA` |
-| offset 100, checksum `0xdeadbeef` | `AcgB776t3gA` |
-| cursor `["Alice", "uuid-7"]`, checksum `0xdeadbeef` | `AQDvvq3eAgMFQWxpY2UDBnV1aWQtNw` |
-| offset 3, checksum `0x01020304`, cursor `[null, true, false, "hi", 0x01ff, -2, 7u, 1.5, 2023-11-14T22:13:20.123456789Z, 90m]` | `AQYEAwIBCgACAQMCaGkEAgH_BQMGBwcAAAAAAAD4PwiAxJ_VDKq03nUJgMCnkam6Ag` |
+| empty | `AgAAAAAAAA` |
+| offset 100, checksum `0xdeadbeef` | `AsgB776t3gA` |
+| cursor `["Alice", "uuid-7"]`, checksum `0xdeadbeef` | `AgDvvq3eAgMFQWxpY2UDBnV1aWQtNw` |
+| offset 3, checksum `0x01020304`, cursor `[null, true, false, "hi", 0x01ff, -2, 7u, 1.5, 2023-11-14T22:13:20.123456789Z, 90m]` | `AgYEAwIBCgACAQMCaGkEAgH_BQMGBwcAAAAAAAD4PwiAxJ_VDKq03nUJgMCnkam6Ag` |
 
-## Encoding a token must be able to fail
+The Go spellings — the same rows with a leading `0x01` — are checked here too,
+as inputs that must be *rejected* on the version byte. That is the guarantee
+the distinct version buys, so it is worth a test rather than a comment. See
+`tests/paging_vectors.rs`.
+
+## An unencodable cursor must never reach the wire
 
 The Go predecessor returned a bare `String()` and discarded the encoding
 error. A cursor holding a value the encoder could not represent produced a
 *silently truncated* token that failed to decode on the client's next request,
-surfacing as a confusing error one round-trip away from the cause.
-
-Encoding returns a result. Serving a page with an unencodable cursor is an
+surfacing as a confusing error one round-trip away from the cause. So in Go,
+encoding returns a result: serving a page with an unencodable cursor is an
 internal error, not something to paper over.
 
-For the same reason: a key-set cursor with **no** ordering fields is an error,
-not an empty cursor. Without a sort key there is nothing to seek on, and an
-empty cursor yields a token that cannot page. When a request carries no
-`order_by`, advance the offset instead.
+**In Rust the failure is unrepresentable instead of reported.** A cursor value
+is the enum `CursorValue`, whose variants are exactly the tags in the table
+above, so there is no way to build the cursor that produced the Go bug and
+`PageToken::encode` is infallible. This is the stronger form of the same
+requirement, not a relaxation of it — the check moves from run time to the
+type, and to the `From` conversions that widen `i32`, `u8`, `f32` and friends
+onto the four numeric tags the wire format has.
+
+The other half of the rule survives as a run-time check, because no type can
+carry it: a key-set cursor with **no** ordering fields is an error, not an
+empty cursor. Without a sort key there is nothing to seek on, and an empty
+cursor yields a token that cannot page. `next_cursor` rejects it; when a
+request carries no `order_by`, advance the offset instead.
+
+## Where the Rust decoder is stricter
+
+Two inputs the Go implementation accepts and this one rejects. Both are
+narrowing, so every token Rust issues still decodes; they only reject tokens
+Rust would never have written.
+
+- **A string cursor value must be UTF-8.** A Go `string` may hold arbitrary
+  bytes and a Rust `String` may not, so a non-UTF-8 payload under tag `0x03`
+  is a decode error. Sort keys that are not text belong under tag `0x04`.
+- **The base64 must be canonical.** The unused low bits of the final character
+  are discarded on decode, so accepting non-zero ones would give a single
+  token several valid spellings — which in turn would make a token usable as a
+  cache or dedupe key only by accident. Go's decoder does not check them.
 
 ## Why not compatible
 
@@ -156,9 +189,20 @@ The trade is that it stops detecting changes to other request fields. For
 these templates that means only `parent`, which the expression above already
 covers.
 
-## Reference implementation
+## Implementations
+
+`src/paging.rs` in this crate is the implementation this document
+specifies. Where the two disagree, **this document wins** — it is normative
+here, which is the point of moving it next to the code.
 
 [protoc-contrib/aip-go](https://github.com/protoc-contrib/aip-go), file
-`pagination.go`. Where this document and that file disagree, the file wins
-until the difference is resolved deliberately — the test vectors above are
-generated from it.
+`pagination.go`, is where the design came from and remains the authority on
+its own tokens. It is no longer a compatibility target; the two now differ
+deliberately, in the version byte and in the two decoder checks above.
+
+One piece of the specification lives outside this crate. The request checksum
+needs the request message cleared of `page_token`, `page_size` and `skip` and
+then marshalled deterministically, and neither is possible without protobuf
+reflection — which is why `aip::paging::request_checksum` takes the
+already-marshalled bytes and generated code supplies them. See the scope note
+in the README.

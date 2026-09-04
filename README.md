@@ -10,18 +10,35 @@ and the Rust counterpart of
 
 ## Status
 
-Nothing implemented yet. The design decisions are settled and recorded — see
-[docs/page-token.md](docs/page-token.md) for the wire format, which is the
-piece worth building first.
+The three modules that are pure data manipulation are implemented, with no
+dependencies — not even a protobuf runtime. See
+[docs/page-token.md](docs/page-token.md) for the page token wire format, which
+is normative.
 
-| AIP | Concept | Where it lives |
-| --- | --- | --- |
-| [122](https://google.aip.dev/122) | resource names | here (pattern scan/format) + generated types |
-| [132](https://google.aip.dev/132#ordering) | `order_by` | here |
-| [158](https://google.aip.dev/158) | page tokens | here |
-| [134](https://google.aip.dev/134) | `update_mask` validation | **generated** |
-| [203](https://google.aip.dev/203) | field behavior | **generated** |
-| [160](https://google.aip.dev/160) | `filter` | neither — see below |
+| AIP | Concept | Where it lives | |
+| --- | --- | --- | --- |
+| [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types | ✅ |
+| [132](https://google.aip.dev/132#ordering) | `order_by` | `ordering` | ✅ |
+| [158](https://google.aip.dev/158) | page tokens | `paging` | ✅ |
+| [134](https://google.aip.dev/134) | `update_mask` validation | **generated** | — |
+| [203](https://google.aip.dev/203) | field behavior | **generated** | — |
+| [160](https://google.aip.dev/160) | `filter` | neither — see below | — |
+
+Two seams are left where a protobuf message would have to be walked, so that
+generated code can supply what it knows and this crate stays dependency-free:
+
+- `paging::request_checksum` takes the deterministically-marshalled request
+  bytes, with `page_token`, `page_size` and `skip` already cleared, rather than
+  the request message.
+- `PageToken::next_cursor` takes the sort-key values, rather than reading them
+  off the last row via field paths. `OrderBy::paths` still says which fields
+  to read, in which order.
+
+The Go predecessor's `ValidateForMessage` — checking that each `order_by` path
+resolves against the request's message descriptor — has no counterpart yet for
+the same reason. `validate_for_paths` covers the case that matters at the RPC
+boundary, since a field must be on the allow-list before its existence is
+interesting.
 
 ## Scope: what is deliberately not here
 
