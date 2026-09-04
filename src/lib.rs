@@ -48,9 +48,7 @@
 
 #![deny(missing_docs)]
 
-mod base64url;
-mod crc32;
-mod varint;
+mod wire;
 
 pub mod ordering;
 pub mod pagination;

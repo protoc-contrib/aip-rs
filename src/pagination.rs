@@ -9,7 +9,7 @@
 use core::fmt;
 use core::str::FromStr;
 
-use crate::{base64url, crc32, varint};
+use crate::wire;
 
 /// The leading byte of every encoded page token.
 ///
@@ -122,21 +122,21 @@ impl CursorValue {
             Self::Bool(true) => buffer.push(tag::TRUE),
             Self::String(value) => {
                 buffer.push(tag::STRING);
-                varint::put_uvarint(buffer, value.len() as u64);
+                wire::write_uvarint(buffer, value.len() as u64);
                 buffer.extend_from_slice(value.as_bytes());
             }
             Self::Bytes(value) => {
                 buffer.push(tag::BYTES);
-                varint::put_uvarint(buffer, value.len() as u64);
+                wire::write_uvarint(buffer, value.len() as u64);
                 buffer.extend_from_slice(value);
             }
             Self::Int(value) => {
                 buffer.push(tag::INT);
-                varint::put_varint(buffer, *value);
+                wire::write_varint(buffer, *value);
             }
             Self::Uint(value) => {
                 buffer.push(tag::UINT);
-                varint::put_uvarint(buffer, *value);
+                wire::write_uvarint(buffer, *value);
             }
             Self::Float(value) => {
                 buffer.push(tag::FLOAT);
@@ -145,12 +145,12 @@ impl CursorValue {
             Self::Timestamp { seconds, nanos } => {
                 let (seconds, nanos) = normalize_timestamp(*seconds, *nanos);
                 buffer.push(tag::TIMESTAMP);
-                varint::put_varint(buffer, seconds);
-                varint::put_varint(buffer, i64::from(nanos));
+                wire::write_varint(buffer, seconds);
+                wire::write_varint(buffer, i64::from(nanos));
             }
             Self::Duration { nanos } => {
                 buffer.push(tag::DURATION);
-                varint::put_varint(buffer, *nanos);
+                wire::write_varint(buffer, *nanos);
             }
         }
     }
@@ -164,7 +164,7 @@ impl CursorValue {
             tag::FALSE => Ok((Self::Bool(false), src)),
             tag::TRUE => Ok((Self::Bool(true), src)),
             tag::STRING | tag::BYTES => {
-                let (length, read) = varint::uvarint(src)?;
+                let (length, read) = wire::read_uvarint(src)?;
                 let src = &src[read..];
                 let length = usize::try_from(length).map_err(|_| DecodeError::Truncated)?;
                 if src.len() < length {
@@ -180,11 +180,11 @@ impl CursorValue {
                 }
             }
             tag::INT => {
-                let (value, read) = varint::varint(src)?;
+                let (value, read) = wire::read_varint(src)?;
                 Ok((Self::Int(value), &src[read..]))
             }
             tag::UINT => {
-                let (value, read) = varint::uvarint(src)?;
+                let (value, read) = wire::read_uvarint(src)?;
                 Ok((Self::Uint(value), &src[read..]))
             }
             tag::FLOAT => {
@@ -199,14 +199,14 @@ impl CursorValue {
                 ))
             }
             tag::TIMESTAMP => {
-                let (seconds, read) = varint::varint(src)?;
+                let (seconds, read) = wire::read_varint(src)?;
                 let src = &src[read..];
-                let (nanos, read) = varint::varint(src)?;
+                let (nanos, read) = wire::read_varint(src)?;
                 let nanos = i32::try_from(nanos).map_err(|_| DecodeError::NanosOutOfRange)?;
                 Ok((Self::timestamp(seconds, nanos), &src[read..]))
             }
             tag::DURATION => {
-                let (nanos, read) = varint::varint(src)?;
+                let (nanos, read) = wire::read_varint(src)?;
                 Ok((Self::Duration { nanos }, &src[read..]))
             }
             unknown => Err(DecodeError::UnknownTag(unknown)),
@@ -377,13 +377,13 @@ impl PageToken {
     pub fn encode(&self) -> String {
         let mut buffer = Vec::with_capacity(32);
         buffer.push(VERSION);
-        varint::put_varint(&mut buffer, self.offset);
+        wire::write_varint(&mut buffer, self.offset);
         buffer.extend_from_slice(&self.request_checksum.to_le_bytes());
-        varint::put_uvarint(&mut buffer, self.cursor.len() as u64);
+        wire::write_uvarint(&mut buffer, self.cursor.len() as u64);
         for value in &self.cursor {
             value.encode_into(&mut buffer);
         }
-        base64url::encode(&buffer)
+        wire::base64_encode(&buffer)
     }
 
     /// Decodes an encoded page token.
@@ -391,12 +391,12 @@ impl PageToken {
     /// This does not check the token against a request; [`parse`](Self::parse)
     /// does that.
     pub fn decode(token: &str) -> Result<Self, DecodeError> {
-        let raw = base64url::decode(token)?;
+        let raw = wire::base64_decode(token)?;
         let (&version, raw) = raw.split_first().ok_or(DecodeError::Truncated)?;
         if version != VERSION {
             return Err(DecodeError::UnsupportedVersion(version));
         }
-        let (offset, read) = varint::varint(raw)?;
+        let (offset, read) = wire::read_varint(raw)?;
         let raw = &raw[read..];
         let checksum: [u8; 4] = raw
             .get(..4)
@@ -404,7 +404,7 @@ impl PageToken {
             .try_into()
             .expect("a 4-byte slice is a 4-byte array");
         let mut raw = &raw[4..];
-        let (length, read) = varint::uvarint(raw)?;
+        let (length, read) = wire::read_uvarint(raw)?;
         raw = &raw[read..];
         // Guard against a hostile length driving a huge allocation: every
         // cursor value costs at least one byte on the wire, so a length past
@@ -510,7 +510,7 @@ impl FromStr for PageToken {
 /// same request does not validate here.
 #[must_use]
 pub fn request_checksum(marshalled: &[u8]) -> u32 {
-    crc32::checksum_ieee(marshalled) ^ CHECKSUM_MASK
+    wire::crc32_ieee(marshalled) ^ CHECKSUM_MASK
 }
 
 /// Why an encoded page token could not be decoded at all.
@@ -553,23 +553,23 @@ pub enum DecodeError {
     TrailingBytes(usize),
 }
 
-impl From<base64url::Error> for DecodeError {
-    fn from(error: base64url::Error) -> Self {
+impl From<wire::Base64Error> for DecodeError {
+    fn from(error: wire::Base64Error) -> Self {
         match error {
-            base64url::Error::InvalidByte { index, byte } => {
+            wire::Base64Error::InvalidByte { index, byte } => {
                 Self::Base64InvalidByte { index, byte }
             }
-            base64url::Error::InvalidLength(length) => Self::Base64InvalidLength(length),
-            base64url::Error::NonCanonical => Self::Base64NonCanonical,
+            wire::Base64Error::InvalidLength(length) => Self::Base64InvalidLength(length),
+            wire::Base64Error::NonCanonical => Self::Base64NonCanonical,
         }
     }
 }
 
-impl From<varint::Error> for DecodeError {
-    fn from(error: varint::Error) -> Self {
+impl From<wire::VarintError> for DecodeError {
+    fn from(error: wire::VarintError) -> Self {
         match error {
-            varint::Error::Truncated => Self::Truncated,
-            varint::Error::Overflow => Self::VarintOverflow,
+            wire::VarintError::Truncated => Self::Truncated,
+            wire::VarintError::Overflow => Self::VarintOverflow,
         }
     }
 }
@@ -748,32 +748,32 @@ mod tests {
 
     #[test]
     fn rejects_trailing_bytes() {
-        let mut raw = base64url::decode(&PageToken::default().encode()).unwrap();
+        let mut raw = wire::base64_decode(&PageToken::default().encode()).unwrap();
         raw.push(0x00);
         assert_eq!(
-            PageToken::decode(&base64url::encode(&raw)),
+            PageToken::decode(&wire::base64_encode(&raw)),
             Err(DecodeError::TrailingBytes(1))
         );
     }
 
     #[test]
     fn rejects_an_unknown_cursor_tag() {
-        let mut raw = base64url::decode(&PageToken::default().encode()).unwrap();
+        let mut raw = wire::base64_decode(&PageToken::default().encode()).unwrap();
         *raw.last_mut().unwrap() = 1; // one cursor value...
         raw.push(0x7f); // ...with a tag from a format that does not exist.
         assert_eq!(
-            PageToken::decode(&base64url::encode(&raw)),
+            PageToken::decode(&wire::base64_encode(&raw)),
             Err(DecodeError::UnknownTag(0x7f))
         );
     }
 
     #[test]
     fn rejects_a_hostile_cursor_length() {
-        let mut raw = base64url::decode(&PageToken::default().encode()).unwrap();
+        let mut raw = wire::base64_decode(&PageToken::default().encode()).unwrap();
         raw.pop();
-        varint::put_uvarint(&mut raw, u64::MAX);
+        wire::write_uvarint(&mut raw, u64::MAX);
         assert_eq!(
-            PageToken::decode(&base64url::encode(&raw)),
+            PageToken::decode(&wire::base64_encode(&raw)),
             Err(DecodeError::Truncated)
         );
     }
@@ -793,7 +793,7 @@ mod tests {
             0xff,
         ];
         assert_eq!(
-            PageToken::decode(&base64url::encode(&raw)),
+            PageToken::decode(&wire::base64_encode(&raw)),
             Err(DecodeError::InvalidUtf8)
         );
     }
