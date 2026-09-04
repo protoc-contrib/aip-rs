@@ -214,6 +214,50 @@ impl ResourcePattern {
         Ok(())
     }
 
+    /// Matches the fully-qualified form of `name` — `//{domain}/` followed by
+    /// the pattern — and returns its variable segments, in pattern order.
+    ///
+    /// `domain` is the service name, which by AIP-123 is the part of a
+    /// resource type before the `/`: `example.com` for `example.com/Book`.
+    ///
+    /// The relative form is the one that travels in a `name` field; this is
+    /// for the fully-qualified form that appears in cross-service references.
+    pub fn scan_full<'a>(&self, name: &'a str, domain: &str) -> Result<Vec<&'a str>, ScanError> {
+        let mut values = vec![""; self.variables];
+        self.scan_full_into(name, domain, &mut values)?;
+        Ok(values)
+    }
+
+    /// Matches the fully-qualified form of `name` and writes its variable
+    /// segments into `values`, in pattern order.
+    ///
+    /// The allocation-free form of [`scan_full`](Self::scan_full); see
+    /// [`scan_into`](Self::scan_into).
+    ///
+    /// # Panics
+    ///
+    /// If `values.len()` is not [`variables`](Self::variables); see
+    /// [`scan_into`](Self::scan_into).
+    pub fn scan_full_into<'a>(
+        &self,
+        name: &'a str,
+        domain: &str,
+        values: &mut [&'a str],
+    ) -> Result<(), ScanError> {
+        let prefix = format!("//{domain}/");
+        let Some(relative) = name.strip_prefix(&prefix) else {
+            // Reported against the name as given, since the prefix is what is
+            // wrong with it; a failure past here reports the relative part it
+            // actually scanned.
+            return Err(ScanError {
+                pattern: self.pattern.clone(),
+                name: name.to_owned(),
+                kind: ScanErrorKind::Prefix { want: prefix },
+            });
+        };
+        self.scan_into(relative, values)
+    }
+
     /// Renders the pattern with `values` substituted for its variable
     /// segments, in pattern order.
     ///
@@ -493,6 +537,14 @@ pub enum ScanErrorKind {
         /// The variable's name.
         name: String,
     },
+    /// A fully-qualified name that does not start with `//{domain}/`.
+    ///
+    /// Only [`scan_full`](ResourcePattern::scan_full) produces this; the
+    /// relative form has no prefix to get wrong.
+    Prefix {
+        /// The prefix the service requires, e.g. `//example.com/`.
+        want: String,
+    },
 }
 
 impl fmt::Display for ScanError {
@@ -512,11 +564,70 @@ impl fmt::Display for ScanError {
             ScanErrorKind::EmptyValue { index, name } => {
                 write!(f, "empty value for segment {index} ({name})")
             }
+            ScanErrorKind::Prefix { want } => {
+                write!(f, "bad prefix, want {want:?}")
+            }
         }
     }
 }
 
 impl core::error::Error for ScanError {}
+
+/// Why a name matched none of the patterns declared for a resource.
+///
+/// A resource with more than one `pattern` is scanned against each in
+/// declaration order; this collects what went wrong with every one of them, so
+/// the caller can say more than "no". Map it to `InvalidArgument` at the RPC
+/// boundary.
+///
+/// Generated code constructs this, which is why [`new`](Self::new) is public.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoPatternError {
+    name: String,
+    attempts: Vec<ScanError>,
+}
+
+impl NoPatternError {
+    /// Collects the failures from scanning `name` against every pattern.
+    #[must_use]
+    pub fn new(name: impl Into<String>, attempts: Vec<ScanError>) -> Self {
+        Self {
+            name: name.into(),
+            attempts,
+        }
+    }
+
+    /// Returns the name that matched nothing.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns why each pattern rejected it, in declaration order.
+    #[must_use]
+    pub fn attempts(&self) -> &[ScanError] {
+        &self.attempts
+    }
+}
+
+impl fmt::Display for NoPatternError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid resource name: {:?} matches none of the patterns:",
+            self.name
+        )?;
+        // The pattern alone, not each attempt's full message: every one of them
+        // repeats the same name, and the reason a non-matching pattern was
+        // rejected is rarely the interesting part.
+        for attempt in &self.attempts {
+            write!(f, " {:?}", attempt.pattern())?;
+        }
+        Ok(())
+    }
+}
+
+impl core::error::Error for NoPatternError {}
 
 /// Why a string is not usable as a resource ID segment.
 ///
@@ -669,6 +780,66 @@ mod tests {
         assert_eq!(
             error.to_string(),
             r#"invalid resource name: parse "publishers/p1/shelves/s1" against "publishers/{publisher}/books/{book}": bad segment 2, want "books", got "shelves""#
+        );
+    }
+
+    #[test]
+    fn scans_a_fully_qualified_name() {
+        assert_eq!(
+            book().scan_full("//example.com/publishers/p1/books/b1", "example.com"),
+            Ok(vec!["p1", "b1"])
+        );
+    }
+
+    #[test]
+    fn rejects_a_fully_qualified_name_with_the_wrong_prefix() {
+        let error = book()
+            .scan_full("//other.example/publishers/p1/books/b1", "example.com")
+            .unwrap_err();
+        assert_eq!(
+            error.kind(),
+            &ScanErrorKind::Prefix {
+                want: "//example.com/".to_owned(),
+            }
+        );
+        // The prefix is what is wrong, so the whole name is what is reported.
+        assert_eq!(error.name(), "//other.example/publishers/p1/books/b1");
+        assert_eq!(
+            error.to_string(),
+            r#"invalid resource name: parse "//other.example/publishers/p1/books/b1" against "publishers/{publisher}/books/{book}": bad prefix, want "//example.com/""#
+        );
+    }
+
+    #[test]
+    fn a_relative_name_is_not_a_fully_qualified_one() {
+        let error = book()
+            .scan_full("publishers/p1/books/b1", "example.com")
+            .unwrap_err();
+        assert!(matches!(error.kind(), ScanErrorKind::Prefix { .. }));
+    }
+
+    #[test]
+    fn past_the_prefix_a_full_scan_reports_the_relative_name() {
+        let error = book()
+            .scan_full("//example.com/publishers/p1/shelves/s1", "example.com")
+            .unwrap_err();
+        assert_eq!(error.name(), "publishers/p1/shelves/s1");
+    }
+
+    #[test]
+    fn no_pattern_error_lists_what_it_tried() {
+        let author_book = ResourcePattern::compile("authors/{author}/books/{book}").unwrap();
+        let name = "shelves/s1/books/b1";
+        let attempts = vec![
+            book().scan(name).unwrap_err(),
+            author_book.scan(name).unwrap_err(),
+        ];
+        let error = NoPatternError::new(name, attempts);
+        assert_eq!(error.name(), name);
+        assert_eq!(error.attempts().len(), 2);
+        assert_eq!(
+            error.to_string(),
+            r#"invalid resource name: "shelves/s1/books/b1" matches none of the patterns: "publishers/{publisher}/books/{book}" "authors/{author}/books/{book}""#
         );
     }
 
