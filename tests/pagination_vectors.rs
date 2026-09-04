@@ -9,7 +9,7 @@
 //! A conforming encoder must reproduce these and a conforming decoder must
 //! accept them.
 
-use aip::paging::CHECKSUM_MASK;
+use aip::pagination::CHECKSUM_MASK;
 use aip::{CursorValue, PageToken};
 
 fn check(token: PageToken, encoded: &str) {
@@ -87,7 +87,7 @@ fn go_tokens_are_rejected_on_the_version_byte() {
     ] {
         assert_eq!(
             PageToken::decode(go_vector),
-            Err(aip::paging::DecodeError::UnsupportedVersion(0x01)),
+            Err(aip::pagination::DecodeError::UnsupportedVersion(0x01)),
             "{go_vector}"
         );
     }
@@ -99,7 +99,7 @@ fn go_tokens_are_rejected_on_the_version_byte() {
 fn the_request_checksum_is_the_masked_crc32() {
     // CRC-32(IEEE) of "123456789" is the CRC catalogue's check value.
     assert_eq!(
-        aip::paging::request_checksum(b"123456789"),
+        aip::pagination::request_checksum(b"123456789"),
         0xcbf4_3926 ^ CHECKSUM_MASK
     );
 }

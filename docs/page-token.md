@@ -105,7 +105,7 @@ must accept them.
 The Go spellings — the same rows with a leading `0x01` — are checked here too,
 as inputs that must be *rejected* on the version byte. That is the guarantee
 the distinct version buys, so it is worth a test rather than a comment. See
-`tests/paging_vectors.rs`.
+`tests/pagination_vectors.rs`.
 
 ## An unencodable cursor must never reach the wire
 
@@ -191,7 +191,7 @@ covers.
 
 ## Implementations
 
-`src/paging.rs` in this crate is the implementation this document
+`src/pagination.rs` in this crate is the implementation this document
 specifies. Where the two disagree, **this document wins** — it is normative
 here, which is the point of moving it next to the code.
 
@@ -203,6 +203,6 @@ deliberately, in the version byte and in the two decoder checks above.
 One piece of the specification lives outside this crate. The request checksum
 needs the request message cleared of `page_token`, `page_size` and `skip` and
 then marshalled deterministically, and neither is possible without protobuf
-reflection — which is why `aip::paging::request_checksum` takes the
+reflection — which is why `aip::pagination::request_checksum` takes the
 already-marshalled bytes and generated code supplies them. See the scope note
 in the README.

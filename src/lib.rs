@@ -53,11 +53,11 @@ mod crc32;
 mod varint;
 
 pub mod ordering;
-pub mod paging;
+pub mod pagination;
 pub mod resource;
 
 pub use ordering::{OrderBy, OrderByField};
-pub use paging::{CursorValue, PageToken};
+pub use pagination::{CursorValue, PageToken};
 pub use resource::{ResourceName, ResourcePattern};
 
 // Not implemented here, deliberately:

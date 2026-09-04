@@ -341,7 +341,7 @@ impl PageToken {
     /// # let (encoded, checksum, skip) = ("", 0u32, 25i64);
     /// let mut token = PageToken::parse(encoded, checksum)?;
     /// token.offset += skip;
-    /// # Ok::<_, aip::paging::ParseError>(())
+    /// # Ok::<_, aip::pagination::ParseError>(())
     /// ```
     ///
     /// Both error variants map to `InvalidArgument` at the RPC boundary, but
