@@ -330,6 +330,46 @@ impl ResourcePattern {
         }
         Ok(())
     }
+
+    /// Builds the error for a variable segment whose value the caller could not
+    /// convert to the type that segment is declared to hold.
+    ///
+    /// Scanning only ever yields `&str`, so a segment with a stronger declared
+    /// type — a UUID, say — is converted by the caller afterwards. This is how
+    /// that conversion failing is reported as a name that does not match the
+    /// pattern, rather than as a second error type alongside [`ScanError`]:
+    ///
+    /// ```
+    /// use aip::ResourcePattern;
+    ///
+    /// let pattern: ResourcePattern = "books/{book}".parse()?;
+    ///
+    /// fn book_id(pattern: &ResourcePattern, name: &str) -> Result<u64, aip::resource::ScanError> {
+    ///     let [scanned] = pattern.scan(name)?[..] else { unreachable!("one variable") };
+    ///     scanned
+    ///         .parse()
+    ///         .map_err(|error| pattern.invalid_value(name, "book", error))
+    /// }
+    ///
+    /// assert_eq!(book_id(&pattern, "books/17")?, 17);
+    /// assert!(book_id(&pattern, "books/seventeen").is_err());
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn invalid_value(
+        &self,
+        name: &str,
+        variable: &str,
+        reason: impl fmt::Display,
+    ) -> ScanError {
+        ScanError {
+            pattern: self.pattern.clone(),
+            name: name.to_owned(),
+            kind: ScanErrorKind::InvalidValue {
+                name: variable.to_owned(),
+                reason: reason.to_string(),
+            },
+        }
+    }
 }
 
 impl FromStr for ResourcePattern {
@@ -366,6 +406,19 @@ pub fn validate_resource_id(id: &str) -> Result<(), InvalidResourceIdError> {
         });
     }
     Ok(())
+}
+
+/// Checks that `id` is usable as the value of the variable segment `segment`.
+///
+/// [`validate_resource_id`] with the segment named, so the error says which
+/// field is at fault. Generated code validates a name a segment at a time
+/// rather than through [`ResourcePattern::validate`], because a segment whose
+/// declared type is not a string has nothing to hand that function.
+pub fn validate_segment(segment: &str, id: &str) -> Result<(), InvalidResourceIdError> {
+    validate_resource_id(id).map_err(|error| InvalidResourceIdError {
+        segment: Some(segment.to_owned()),
+        ..error
+    })
 }
 
 /// Returns whether any of `ids` is the AIP-159 [`WILDCARD`].
@@ -545,6 +598,18 @@ pub enum ScanErrorKind {
         /// The prefix the service requires, e.g. `//example.com/`.
         want: String,
     },
+    /// A variable segment whose value is not valid for the type that segment is
+    /// declared to hold.
+    ///
+    /// Raised by the caller through
+    /// [`invalid_value`](ResourcePattern::invalid_value), not by the scan
+    /// itself, which has no opinion about anything beyond the separator.
+    InvalidValue {
+        /// The variable's name.
+        name: String,
+        /// What the conversion said was wrong with it.
+        reason: String,
+    },
 }
 
 impl fmt::Display for ScanError {
@@ -566,6 +631,9 @@ impl fmt::Display for ScanError {
             }
             ScanErrorKind::Prefix { want } => {
                 write!(f, "bad prefix, want {want:?}")
+            }
+            ScanErrorKind::InvalidValue { name, reason } => {
+                write!(f, "invalid value for segment ({name}): {reason}")
             }
         }
     }
@@ -641,6 +709,19 @@ pub struct InvalidResourceIdError {
 }
 
 impl InvalidResourceIdError {
+    /// The error for a variable segment with no value.
+    ///
+    /// A segment whose declared type is not a string has its own idea of what
+    /// "no value" is — the nil UUID, say — which only the code holding that
+    /// type can recognise, so this is what it reports with.
+    #[must_use]
+    pub fn empty(segment: &str) -> Self {
+        Self {
+            segment: Some(segment.to_owned()),
+            empty: true,
+        }
+    }
+
     /// Returns the name of the variable segment at fault, if the ID was
     /// checked as part of a pattern.
     #[must_use]
@@ -841,6 +922,42 @@ mod tests {
             error.to_string(),
             r#"invalid resource name: "shelves/s1/books/b1" matches none of the patterns: "publishers/{publisher}/books/{book}" "authors/{author}/books/{book}""#
         );
+    }
+
+    #[test]
+    fn reports_a_value_its_segment_type_rejects() {
+        let pattern = book();
+        let error = pattern.invalid_value(
+            "publishers/p1/books/not-a-uuid",
+            "book",
+            "invalid length: expected 36, found 10",
+        );
+        assert_eq!(
+            error.kind(),
+            &ScanErrorKind::InvalidValue {
+                name: "book".to_owned(),
+                reason: "invalid length: expected 36, found 10".to_owned(),
+            }
+        );
+        assert_eq!(
+            error.to_string(),
+            r#"invalid resource name: parse "publishers/p1/books/not-a-uuid" against "publishers/{publisher}/books/{book}": invalid value for segment (book): invalid length: expected 36, found 10"#
+        );
+    }
+
+    #[test]
+    fn validates_one_segment_at_a_time() {
+        assert!(validate_segment("book", "b1").is_ok());
+        let error = validate_segment("book", "b/1").unwrap_err();
+        assert_eq!(error.segment(), Some("book"));
+        assert_eq!(error.to_string(), "book: contains illegal character '/'");
+    }
+
+    #[test]
+    fn a_segment_can_report_itself_empty() {
+        let error = InvalidResourceIdError::empty("book");
+        assert_eq!(error.segment(), Some("book"));
+        assert_eq!(error.to_string(), "book: empty");
     }
 
     #[test]
