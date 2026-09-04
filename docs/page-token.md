@@ -3,11 +3,18 @@ normative specification, so it lives with the implementation. -->
 
 # Page token wire format
 
-**Decide first: do Rust and Go services need to exchange tokens?** If a client
-can be served by either implementation, or a service migrates between them,
-then a token issued by one must decode in the other and this section is a
-binding specification. If not, reimplement freely — but the shape below is
-worth keeping regardless, because the failure modes it avoids were real.
+**Decided: Rust and Go tokens are not interchangeable.** This document is a
+design to copy, not a compatibility contract. See
+[Why not compatible](#why-not-compatible) for the reasoning and for the
+cheap path back if that changes.
+
+Use version byte `0x02` in Rust rather than `0x01`, so a token fed to the
+wrong implementation is rejected immediately and unmistakably instead of
+decoding structurally and then failing its checksum.
+
+The shape below is still worth copying exactly: every part of it came from
+fixing a real bug, and the test vectors will verify your varint and tag
+handling even though the checksums will differ.
 
 A page token supports both AIP-158 styles. Use one per List method:
 
@@ -103,6 +110,51 @@ For the same reason: a key-set cursor with **no** ordering fields is an error,
 not an empty cursor. Without a sort key there is nothing to seek on, and an
 empty cursor yields a token that cannot page. When a request carries no
 `order_by`, advance the offset instead.
+
+## Why not compatible
+
+The checksum makes cross-implementation tokens impractical. It is a CRC-32
+over the deterministically-marshalled request, and protobuf's own
+documentation rules that out as a cross-language primitive:
+
+> Note that the deterministic serialization is NOT canonical across
+> languages. It is not guaranteed to remain stable over time. […] Users who
+> need canonical serialization (e.g., persistent storage in a canonical form,
+> **fingerprinting**, etc.) must define their own canonicalization
+> specification and implement their own serializer rather than relying on
+> this API.
+
+Fingerprinting is precisely what this checksum does. Porting the wire format
+byte-for-byte would reproduce the cursor bytes and still not reproduce the
+checksum; real compatibility would mean hand-writing a canonical serializer
+in both languages and freezing it forever.
+
+Set against that, the scenario needing it is small and self-healing. A stale
+token already returns `InvalidArgument`, so at a Go-to-Rust cutover in-flight
+clients restart pagination from page one — one page-lifetime of degradation,
+versus a permanent constraint on two codebases.
+
+**Note this also bounds the Go implementation.** "Not guaranteed to remain
+stable over time" applies within a single language: a protobuf library
+upgrade could in principle change the serialization and invalidate in-flight
+tokens. The failure is the same benign one — `InvalidArgument`, restart from
+page one — but the checksum is stable by convention, not by contract.
+
+### The cheap path back
+
+If tokens ever do need to interoperate, do not write a canonical serializer.
+Checksum the query-defining strings instead of the marshalled message:
+
+    crc32(parent + "\0" + filter + "\0" + order_by)
+
+Those are plain UTF-8 and canonical by construction, so any language computes
+the same value. The checksum only has to detect "the client changed the query
+mid-page", and it does not need to cover the whole message to do that — it is
+in fact *more* stable this way, being immune to protobuf version drift.
+
+The trade is that it stops detecting changes to other request fields. For
+these templates that means only `parent`, which the expression above already
+covers.
 
 ## Reference implementation
 
