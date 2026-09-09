@@ -36,6 +36,12 @@
 //! - AIP-132 ordering — [`OrderBy`]
 //! - AIP-158 pagination — [`PageToken`], [`CursorValue`]
 //!
+//! One more contributes only the error generated code reports with, for the
+//! same reason [`query`] does — the check needs a message to walk, which this
+//! crate has no protobuf runtime to walk:
+//!
+//! - AIP-134 field masks — [`field_mask::FieldMaskError`]
+//!
 //! AIP-160 filtering is plain CEL, so the parser is whichever CEL crate the
 //! caller picked and this one contributes only the error type generated code
 //! reports with — see [`query`].
@@ -54,6 +60,7 @@
 
 mod wire;
 
+pub mod field_mask;
 pub mod ordering;
 pub mod pagination;
 pub mod query;
@@ -69,8 +76,18 @@ pub use resource::{ResourceName, ResourcePattern};
 //   AIP-134 update_mask validation and AIP-203 field behavior are generated,
 //           because they need to walk — and in the OUTPUT_ONLY case mutate — a
 //           protobuf message, which buffa 0.9.1 offers no reflective path to.
+//           The mask error is here, so a caller matches on one type rather than
+//           one per generated package; the walk is not.
 //   AIP-160 filter is plain CEL, so the runtime is the `cel` crate and this
 //           crate contributes nothing.
+//   AIP-203 REQUIRED is protovalidate's, not ours. A schema that marks a field
+//           REQUIRED and also constrains it with `buf.validate` has said the
+//           same thing twice; enforcing it a third time from here would only
+//           add a copy free to disagree with the one the server actually runs.
+//           Keeping the two annotations in step is a lint, not a runtime.
 //
-// The read-only halves of AIP-134 and AIP-203 could live here behind a buffa
-// feature; see the README.
+// Doing the mask check reflectively here instead would need a buffa feature,
+// and so a protobuf runtime in a crate that has gone to some trouble not to
+// have one. Generating it costs output size and nothing else: the set of
+// updatable paths is known at codegen time, so the walk has no descriptor to
+// consult.

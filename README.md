@@ -20,12 +20,19 @@ is normative.
 | [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types | ✅ |
 | [132](https://google.aip.dev/132#ordering) | `order_by` | `ordering` | ✅ |
 | [158](https://google.aip.dev/158) | page tokens | `pagination` | ✅ |
-| [134](https://google.aip.dev/134) | `update_mask` validation | **generated** | — |
-| [203](https://google.aip.dev/203) | field behavior | **generated** | — |
+| [134](https://google.aip.dev/134) | `update_mask` validation | **generated**, reporting `field_mask::FieldMaskError` | ✅ |
+| [203](https://google.aip.dev/203) | field behavior | `OUTPUT_ONLY` **generated**; `REQUIRED` is protovalidate's — see below | — |
 | [160](https://google.aip.dev/160) | `filter` | neither — see below | — |
 
-Two seams are left where a protobuf message would have to be walked, so that
-generated code can supply what it knows and this crate stays dependency-free:
+Where a check needs a message walked, the walk is generated and the *error* is
+here. That is not a detail of packaging: a caller matching on one
+`FieldMaskError` rather than one type per generated package is the whole point
+of the error living in a crate both sides can name. The same split as
+`query::FilterError`, which generated code raises after compiling a filter with
+whichever CEL crate the consumer picked.
+
+Three more seams are left where generated code supplies what it knows, so this
+crate stays dependency-free:
 
 - `pagination::request_checksum` takes the deterministically-marshalled request
   bytes, with `page_token`, `page_size` and `skip` already cleared, rather than
@@ -46,6 +53,14 @@ interesting.
 [`cel`](https://crates.io/crates/cel) crate and this crate contributes
 nothing. The Go predecessor carried ~3,000 lines to parse AIP-160's
 CEL-*like* grammar; that grammar was dropped rather than ported.
+
+**`REQUIRED` fields.** protovalidate's. A schema that marks a field
+`(google.api.field_behavior) = REQUIRED` and also constrains it with
+`(buf.validate.field).required` — or a `min_len`, for a scalar with no presence
+— has said the same thing twice, and the server already runs the second one.
+Enforcing it a third time from here would add a copy free to drift out of
+agreement with the one that is actually checked. Keeping the two annotations in
+step is a job for a lint, not for a runtime.
 
 **Mutating a protobuf message.** Clearing `OUTPUT_ONLY` fields is *generated*,
 because buffa 0.9.1 offers no reflective path to mutation at all:
