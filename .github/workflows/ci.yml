@@ -46,6 +46,11 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+      # Builds the crate from what `include` ships, so a packaging break shows
+      # up on the pull request rather than in the publish job.
+      - name: Check Package
+        run: nix develop --command cargo package
+
   release:
     needs: test
     if: github.event_name == 'push'
