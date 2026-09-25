@@ -66,6 +66,12 @@ impl ResourcePattern {
     /// a literal that must match exactly. Variable names must be unique so
     /// that error messages can identify a segment unambiguously.
     ///
+    /// Segments are held to AIP-122's spelling: a literal is a `camelCase`
+    /// collection identifier and a variable name is `snake_case`, each
+    /// starting with a lowercase ASCII letter. Anything else — `{book=**}`
+    /// path-template syntax included — is rejected here rather than turning
+    /// up later as a segment that nothing can name.
+    ///
     /// [`str::parse`] is the same thing and usually reads better.
     pub fn compile(pattern: &str) -> Result<Self, CompileError> {
         let error = |kind| CompileError {
@@ -86,6 +92,9 @@ impl ResourcePattern {
                 if part.contains(['{', '}']) {
                     return Err(error(CompileErrorKind::MalformedSegment(part.to_owned())));
                 }
+                if !is_collection_id(part) {
+                    return Err(error(CompileErrorKind::InvalidLiteral(part.to_owned())));
+                }
                 segments.push(Segment {
                     name: part.to_owned(),
                     variable: false,
@@ -100,6 +109,11 @@ impl ResourcePattern {
             }
             if name.contains(['{', '}']) {
                 return Err(error(CompileErrorKind::MalformedSegment(part.to_owned())));
+            }
+            if !is_variable_name(name) {
+                return Err(error(CompileErrorKind::InvalidVariableName(
+                    name.to_owned(),
+                )));
             }
             if segments.iter().any(|s| s.variable && s.name == name) {
                 return Err(error(CompileErrorKind::DuplicateVariable(name.to_owned())));
@@ -244,15 +258,22 @@ impl ResourcePattern {
         domain: &str,
         values: &mut [&'a str],
     ) -> Result<(), ParseError> {
-        let prefix = format!("//{domain}/");
-        let Some(relative) = name.strip_prefix(&prefix) else {
+        // Stripped a piece at a time, so a name that matches costs nothing;
+        // only the error spells the prefix out.
+        let relative = name
+            .strip_prefix("//")
+            .and_then(|rest| rest.strip_prefix(domain))
+            .and_then(|rest| rest.strip_prefix('/'));
+        let Some(relative) = relative else {
             // Reported against the name as given, since the prefix is what is
             // wrong with it; a failure past here reports the relative part it
             // actually scanned.
             return Err(ParseError {
                 pattern: self.pattern.clone(),
                 name: name.to_owned(),
-                kind: ParseErrorKind::Prefix { want: prefix },
+                kind: ParseErrorKind::Prefix {
+                    want: format!("//{domain}/"),
+                },
             });
         };
         self.scan_into(relative, values)
@@ -381,6 +402,21 @@ impl FromStr for ResourcePattern {
     }
 }
 
+/// Whether `literal` is an AIP-122 collection identifier: `camelCase`, which is
+/// a lowercase ASCII letter followed by ASCII letters and digits.
+fn is_collection_id(literal: &str) -> bool {
+    let mut chars = literal.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase()) && chars.all(|c| c.is_ascii_alphanumeric())
+}
+
+/// Whether `name` is usable as a variable name: `snake_case`, which is a
+/// lowercase ASCII letter followed by lowercase letters, digits and `_`.
+fn is_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
 impl fmt::Display for ResourcePattern {
     /// Writes the pattern this was compiled from.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -393,17 +429,15 @@ impl fmt::Display for ResourcePattern {
 /// An ID must be non-empty and must not contain the `/` separator, which would
 /// silently split one segment into two.
 pub fn validate_resource_id(id: &str) -> Result<(), InvalidResourceIdError> {
+    let error = |kind| InvalidResourceIdError {
+        segment: None,
+        kind,
+    };
     if id.is_empty() {
-        return Err(InvalidResourceIdError {
-            segment: None,
-            empty: true,
-        });
+        return Err(error(InvalidResourceIdErrorKind::Empty));
     }
     if id.contains('/') {
-        return Err(InvalidResourceIdError {
-            segment: None,
-            empty: false,
-        });
+        return Err(error(InvalidResourceIdErrorKind::Separator));
     }
     Ok(())
 }
@@ -510,6 +544,10 @@ pub enum CompileErrorKind {
     EmptyVariableName(usize),
     /// A variable name used by more than one segment.
     DuplicateVariable(String),
+    /// A literal segment that is not a `camelCase` collection identifier.
+    InvalidLiteral(String),
+    /// A variable name that is not `snake_case`.
+    InvalidVariableName(String),
 }
 
 impl fmt::Display for CompileError {
@@ -526,6 +564,15 @@ impl fmt::Display for CompileError {
             }
             CompileErrorKind::DuplicateVariable(name) => {
                 write!(f, "duplicate variable {name:?}")
+            }
+            CompileErrorKind::InvalidLiteral(literal) => {
+                write!(
+                    f,
+                    "literal {literal:?} is not a camelCase collection identifier"
+                )
+            }
+            CompileErrorKind::InvalidVariableName(name) => {
+                write!(f, "variable name {name:?} is not snake_case")
             }
         }
     }
@@ -706,8 +753,7 @@ impl core::error::Error for NoPatternError {}
 pub struct InvalidResourceIdError {
     /// The variable segment at fault, when the ID came from a pattern.
     segment: Option<String>,
-    /// Whether the ID was empty, as opposed to containing a `/`.
-    empty: bool,
+    kind: InvalidResourceIdErrorKind,
 }
 
 impl InvalidResourceIdError {
@@ -720,7 +766,7 @@ impl InvalidResourceIdError {
     pub fn empty(segment: &str) -> Self {
         Self {
             segment: Some(segment.to_owned()),
-            empty: true,
+            kind: InvalidResourceIdErrorKind::Empty,
         }
     }
 
@@ -730,6 +776,23 @@ impl InvalidResourceIdError {
     pub fn segment(&self) -> Option<&str> {
         self.segment.as_deref()
     }
+
+    /// Returns what was wrong with the ID.
+    #[must_use]
+    pub fn kind(&self) -> &InvalidResourceIdErrorKind {
+        &self.kind
+    }
+}
+
+/// What was wrong with a resource ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InvalidResourceIdErrorKind {
+    /// The ID was empty.
+    Empty,
+    /// The ID contains the `/` separator, which would split one segment into
+    /// two.
+    Separator,
 }
 
 impl fmt::Display for InvalidResourceIdError {
@@ -737,10 +800,9 @@ impl fmt::Display for InvalidResourceIdError {
         if let Some(segment) = &self.segment {
             write!(f, "{segment}: ")?;
         }
-        if self.empty {
-            f.write_str("empty")
-        } else {
-            f.write_str("contains illegal character '/'")
+        match self.kind {
+            InvalidResourceIdErrorKind::Empty => f.write_str("empty"),
+            InvalidResourceIdErrorKind::Separator => f.write_str("contains illegal character '/'"),
         }
     }
 }
@@ -800,6 +862,31 @@ mod tests {
             kind("books/{book}/editions/{book}"),
             CompileErrorKind::DuplicateVariable("book".to_owned())
         );
+    }
+
+    #[test]
+    fn holds_segments_to_aip_122_spelling() {
+        let kind = |pattern: &str| ResourcePattern::compile(pattern).unwrap_err().kind;
+        for literal in [
+            "Publishers",
+            "book_shelves",
+            "book-shelves",
+            "a b",
+            "1books",
+        ] {
+            assert_eq!(
+                kind(&format!("{literal}/{{id}}")),
+                CompileErrorKind::InvalidLiteral(literal.to_owned())
+            );
+        }
+        for variable in ["book=**", "pub lisher", "billingAccount", "_book", "1book"] {
+            assert_eq!(
+                kind(&format!("books/{{{variable}}}")),
+                CompileErrorKind::InvalidVariableName(variable.to_owned())
+            );
+        }
+        let pattern = ResourcePattern::compile("billingAccounts/{billing_account}/logs/{log2}");
+        assert!(pattern.is_ok());
     }
 
     #[test]
@@ -902,6 +989,14 @@ mod tests {
     }
 
     #[test]
+    fn a_domain_must_end_at_the_separator() {
+        let error = book()
+            .scan_full("//example.comx/publishers/p1/books/b1", "example.com")
+            .unwrap_err();
+        assert!(matches!(error.kind(), ParseErrorKind::Prefix { .. }));
+    }
+
+    #[test]
     fn past_the_prefix_a_full_scan_reports_the_relative_name() {
         let error = book()
             .scan_full("//example.com/publishers/p1/shelves/s1", "example.com")
@@ -952,6 +1047,7 @@ mod tests {
         assert!(validate_segment("book", "b1").is_ok());
         let error = validate_segment("book", "b/1").unwrap_err();
         assert_eq!(error.segment(), Some("book"));
+        assert_eq!(error.kind(), &InvalidResourceIdErrorKind::Separator);
         assert_eq!(error.to_string(), "book: contains illegal character '/'");
     }
 
@@ -959,6 +1055,7 @@ mod tests {
     fn a_segment_can_report_itself_empty() {
         let error = InvalidResourceIdError::empty("book");
         assert_eq!(error.segment(), Some("book"));
+        assert_eq!(error.kind(), &InvalidResourceIdErrorKind::Empty);
         assert_eq!(error.to_string(), "book: empty");
     }
 
