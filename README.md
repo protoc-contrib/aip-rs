@@ -82,18 +82,13 @@ generated code reads `aip::ResourcePattern`:
 
 ```toml
 [dependencies]
-aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.1.0" }
+aip = { package = "aip-rs", version = "0.1" }
 ```
 
-**This crate is not published to crates.io**, and does not need to be: no
-consumer of it is published either. Git is the source of truth. That keeps
-the API free to change without version churn, and publishing stays available
-later if it ever matters — it is purely additive.
+The minimum supported Rust version is 1.85, the first with edition 2024.
 
-One cost to know about, if you build with Nix: a git dependency needs a
-`cargoLock.outputHashes` entry, and the hash changes with every revision you
-bump to. Registry dependencies do not. Pin to a tag rather than a branch so
-the hash only moves when you decide it does.
+The crate is pre-1.0: a breaking change bumps the minor version, so `0.1`
+above will not pick one up unasked.
 
 ## License
 

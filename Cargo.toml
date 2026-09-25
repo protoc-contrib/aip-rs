@@ -2,11 +2,15 @@
 name = "aip-rs"
 version = "0.0.0"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT"
 description = "Runtime primitives for Google API Improvement Proposals: resource names."
 repository = "https://github.com/protoc-contrib/aip-rs"
 keywords = ["aip", "grpc", "protobuf", "resource-names"]
-categories = ["api-bindings"]
+categories = ["parser-implementations", "network-programming"]
+# What a consumer builds from. CI, Nix and the pinned toolchain are this
+# repository's, not the crate's.
+include = ["src/**", "README.md", "LICENSE", "CHANGELOG.md"]
 
 # The crate is `aip-rs` because `aip` is taken on crates.io. Consumers rename
 # it back, so generated code reads `aip::ResourcePattern`:
