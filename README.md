@@ -10,42 +10,27 @@ and the Rust counterpart of
 
 ## Status
 
-The three modules that are pure data manipulation are implemented, with no
-dependencies — not even a protobuf runtime. See
-[docs/page-token.md](docs/page-token.md) for the page token wire format, which
-is normative.
+The one module that is pure data manipulation is implemented, with no
+dependencies — not even a protobuf runtime.
 
 | AIP | Concept | Where it lives | |
 | --- | --- | --- | --- |
 | [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types | ✅ |
-| [132](https://google.aip.dev/132#ordering) | `order_by` | `ordering` | ✅ |
-| [158](https://google.aip.dev/158) | page tokens | `pagination` | ✅ |
+| [159](https://google.aip.dev/159) | wildcard segments | `resource` | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` validation | **generated** | — |
 | [203](https://google.aip.dev/203) | field behavior | **generated** | — |
-| [160](https://google.aip.dev/160) | `filter` | neither — see below | — |
-
-Two seams are left where a protobuf message would have to be walked, so that
-generated code can supply what it knows and this crate stays dependency-free:
-
-- `pagination::request_checksum` takes the deterministically-marshalled request
-  bytes, with `page_token`, `page_size` and `skip` already cleared, rather than
-  the request message.
-- `PageToken::next_cursor` takes the sort-key values, rather than reading them
-  off the last row via field paths. `OrderBy::paths` still says which fields
-  to read, in which order.
-
-The Go predecessor's `ValidateForMessage` — checking that each `order_by` path
-resolves against the request's message descriptor — has no counterpart yet for
-the same reason. `validate_for_paths` covers the case that matters at the RPC
-boundary, since a field must be on the allow-list before its existence is
-interesting.
+| [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158), [160](https://google.aip.dev/160) | `order_by`, page tokens, `filter` | the query layer — see below | — |
 
 ## Scope: what is deliberately not here
 
-**Filtering.** Filters are plain CEL, not AIP-160, so the runtime is the
-[`cel`](https://crates.io/crates/cel) crate and this crate contributes
-nothing. The Go predecessor carried ~3,000 lines to parse AIP-160's
-CEL-*like* grammar; that grammar was dropped rather than ported.
+**List queries.** `order_by`, page tokens and `filter` are the query layer's.
+Which fields a List request may name is the mapping from AIP paths to columns,
+a filter is only as good as the query it becomes, and a page token is whatever
+the pager resumes from — a keyset cursor, not an offset. Decided anywhere else,
+they could only disagree with the query that runs, so they live where it runs:
+[sqlx-query](https://github.com/sqlx-contrib/sqlx-query) parses all three, for
+SQL. The Go predecessor's ordering and pagination, and the ~3,000 lines it
+carried to parse AIP-160's CEL-*like* grammar, have no counterpart here.
 
 **Mutating a protobuf message.** Clearing `OUTPUT_ONLY` fields is *generated*,
 because buffa 0.9.1 offers no reflective path to mutation at all:
@@ -68,8 +53,8 @@ impl Collection {
 }
 ```
 
-Reads are a different matter. Validating `REQUIRED` fields, extracting a
-cursor and checking `update_mask` paths are all read-only, so they can live
+Reads are a different matter. Validating `REQUIRED` fields and checking
+`update_mask` paths are both read-only, so they can live
 here and use `Reflectable` the way aip-go uses `protoreflect`. Revisit this
 if a buffa release lands `reflect_mut`.
 
@@ -88,7 +73,7 @@ It is one line in `buf.gen.yaml` and nothing here has to change.
 ## Consuming it
 
 `aip` is taken on crates.io, so the package is `aip-rs`. Rename it back and
-generated code reads `aip::PageToken`:
+generated code reads `aip::ResourcePattern`:
 
 ```toml
 [dependencies]
