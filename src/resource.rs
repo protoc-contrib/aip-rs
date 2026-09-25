@@ -37,7 +37,7 @@ pub const WILDCARD: &str = "-";
 /// let ids = BOOK_NAME.scan("publishers/p1/books/b1")?;
 /// assert_eq!(ids, ["p1", "b1"]);
 /// assert_eq!(BOOK_NAME.format(&ids), "publishers/p1/books/b1");
-/// # Ok::<_, aip::resource::ScanError>(())
+/// # Ok::<_, aip::resource::ParseError>(())
 /// ```
 ///
 /// A compiled pattern is immutable and safe to share across threads.
@@ -142,7 +142,7 @@ impl ResourcePattern {
     ///
     /// The values borrow from `name`. Literal segments must match exactly and
     /// variable segments must be non-empty.
-    pub fn scan<'a>(&self, name: &'a str) -> Result<Vec<&'a str>, ScanError> {
+    pub fn scan<'a>(&self, name: &'a str) -> Result<Vec<&'a str>, ParseError> {
         let mut values = vec![""; self.variables];
         self.scan_into(name, &mut values)?;
         Ok(values)
@@ -162,14 +162,14 @@ impl ResourcePattern {
     /// caller passes a fixed-size array, so a mismatch is a codegen bug rather
     /// than anything a request can provoke — the same reasoning that makes
     /// [`format`](Self::format) panic.
-    pub fn scan_into<'a>(&self, name: &'a str, values: &mut [&'a str]) -> Result<(), ScanError> {
+    pub fn scan_into<'a>(&self, name: &'a str, values: &mut [&'a str]) -> Result<(), ParseError> {
         assert_eq!(
             values.len(),
             self.variables,
             "scan resource name against {:?}: wrong number of destinations",
             self.pattern
         );
-        let error = |kind| ScanError {
+        let error = |kind| ParseError {
             pattern: self.pattern.clone(),
             name: name.to_owned(),
             kind,
@@ -178,7 +178,7 @@ impl ResourcePattern {
         // sent rather than failing on whichever segment happens to differ.
         let got = name.split('/').count();
         if got != self.segments.len() {
-            return Err(error(ScanErrorKind::SegmentCount {
+            return Err(error(ParseErrorKind::SegmentCount {
                 want: self.segments.len(),
                 got,
             }));
@@ -189,13 +189,13 @@ impl ResourcePattern {
         for (index, (segment, part)) in self.segments.iter().zip(name.split('/')).enumerate() {
             if segment.variable {
                 if part.is_empty() {
-                    return Err(error(ScanErrorKind::EmptyValue {
+                    return Err(error(ParseErrorKind::EmptyValue {
                         index,
                         name: segment.name.clone(),
                     }));
                 }
             } else if part != segment.name {
-                return Err(error(ScanErrorKind::Literal {
+                return Err(error(ParseErrorKind::Literal {
                     index,
                     want: segment.name.clone(),
                     got: part.to_owned(),
@@ -222,7 +222,7 @@ impl ResourcePattern {
     ///
     /// The relative form is the one that travels in a `name` field; this is
     /// for the fully-qualified form that appears in cross-service references.
-    pub fn scan_full<'a>(&self, name: &'a str, domain: &str) -> Result<Vec<&'a str>, ScanError> {
+    pub fn scan_full<'a>(&self, name: &'a str, domain: &str) -> Result<Vec<&'a str>, ParseError> {
         let mut values = vec![""; self.variables];
         self.scan_full_into(name, domain, &mut values)?;
         Ok(values)
@@ -243,16 +243,16 @@ impl ResourcePattern {
         name: &'a str,
         domain: &str,
         values: &mut [&'a str],
-    ) -> Result<(), ScanError> {
+    ) -> Result<(), ParseError> {
         let prefix = format!("//{domain}/");
         let Some(relative) = name.strip_prefix(&prefix) else {
             // Reported against the name as given, since the prefix is what is
             // wrong with it; a failure past here reports the relative part it
             // actually scanned.
-            return Err(ScanError {
+            return Err(ParseError {
                 pattern: self.pattern.clone(),
                 name: name.to_owned(),
-                kind: ScanErrorKind::Prefix { want: prefix },
+                kind: ParseErrorKind::Prefix { want: prefix },
             });
         };
         self.scan_into(relative, values)
@@ -337,14 +337,14 @@ impl ResourcePattern {
     /// Scanning only ever yields `&str`, so a segment with a stronger declared
     /// type — a UUID, say — is converted by the caller afterwards. This is how
     /// that conversion failing is reported as a name that does not match the
-    /// pattern, rather than as a second error type alongside [`ScanError`]:
+    /// pattern, rather than as a second error type alongside [`ParseError`]:
     ///
     /// ```
     /// use aip::ResourcePattern;
     ///
     /// let pattern: ResourcePattern = "books/{book}".parse()?;
     ///
-    /// fn book_id(pattern: &ResourcePattern, name: &str) -> Result<u64, aip::resource::ScanError> {
+    /// fn book_id(pattern: &ResourcePattern, name: &str) -> Result<u64, aip::resource::ParseError> {
     ///     let [scanned] = pattern.scan(name)?[..] else { unreachable!("one variable") };
     ///     scanned
     ///         .parse()
@@ -360,11 +360,11 @@ impl ResourcePattern {
         name: &str,
         variable: &str,
         reason: impl fmt::Display,
-    ) -> ScanError {
-        ScanError {
+    ) -> ParseError {
+        ParseError {
             pattern: self.pattern.clone(),
             name: name.to_owned(),
-            kind: ScanErrorKind::InvalidValue {
+            kind: ParseErrorKind::InvalidValue {
                 name: variable.to_owned(),
                 reason: reason.to_string(),
             },
@@ -533,24 +533,26 @@ impl fmt::Display for CompileError {
 
 impl core::error::Error for CompileError {}
 
-/// Why a string is not a resource name of the pattern it was scanned against.
+/// Why a string does not parse as a resource name of a pattern -- what every
+/// generated `parse`, `parse_name` and `parse_<field>` returns, and
+/// [`ResourcePattern::scan`] underneath them.
 ///
 /// Map it to `InvalidArgument` at the RPC boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScanError {
+pub struct ParseError {
     pattern: String,
     name: String,
-    kind: ScanErrorKind,
+    kind: ParseErrorKind,
 }
 
-impl ScanError {
-    /// Returns the pattern the name was scanned against.
+impl ParseError {
+    /// Returns the pattern the name was parsed against.
     #[must_use]
     pub fn pattern(&self) -> &str {
         &self.pattern
     }
 
-    /// Returns the name that failed to scan.
+    /// Returns the name that failed to parse.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -558,7 +560,7 @@ impl ScanError {
 
     /// Returns what was wrong with it.
     #[must_use]
-    pub fn kind(&self) -> &ScanErrorKind {
+    pub fn kind(&self) -> &ParseErrorKind {
         &self.kind
     }
 }
@@ -566,7 +568,7 @@ impl ScanError {
 /// What was wrong with a resource name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ScanErrorKind {
+pub enum ParseErrorKind {
     /// The name has the wrong number of `/`-separated segments.
     SegmentCount {
         /// The number the pattern has.
@@ -612,7 +614,7 @@ pub enum ScanErrorKind {
     },
 }
 
-impl fmt::Display for ScanError {
+impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -620,26 +622,26 @@ impl fmt::Display for ScanError {
             self.name, self.pattern
         )?;
         match &self.kind {
-            ScanErrorKind::SegmentCount { want, got } => {
+            ParseErrorKind::SegmentCount { want, got } => {
                 write!(f, "bad number of segments, want {want}, got {got}")
             }
-            ScanErrorKind::Literal { index, want, got } => {
+            ParseErrorKind::Literal { index, want, got } => {
                 write!(f, "bad segment {index}, want {want:?}, got {got:?}")
             }
-            ScanErrorKind::EmptyValue { index, name } => {
+            ParseErrorKind::EmptyValue { index, name } => {
                 write!(f, "empty value for segment {index} ({name})")
             }
-            ScanErrorKind::Prefix { want } => {
+            ParseErrorKind::Prefix { want } => {
                 write!(f, "bad prefix, want {want:?}")
             }
-            ScanErrorKind::InvalidValue { name, reason } => {
+            ParseErrorKind::InvalidValue { name, reason } => {
                 write!(f, "invalid value for segment ({name}): {reason}")
             }
         }
     }
 }
 
-impl core::error::Error for ScanError {}
+impl core::error::Error for ParseError {}
 
 /// Why a name matched none of the patterns declared for a resource.
 ///
@@ -652,13 +654,13 @@ impl core::error::Error for ScanError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoPatternError {
     name: String,
-    attempts: Vec<ScanError>,
+    attempts: Vec<ParseError>,
 }
 
 impl NoPatternError {
     /// Collects the failures from scanning `name` against every pattern.
     #[must_use]
-    pub fn new(name: impl Into<String>, attempts: Vec<ScanError>) -> Self {
+    pub fn new(name: impl Into<String>, attempts: Vec<ParseError>) -> Self {
         Self {
             name: name.into(),
             attempts,
@@ -673,7 +675,7 @@ impl NoPatternError {
 
     /// Returns why each pattern rejected it, in declaration order.
     #[must_use]
-    pub fn attempts(&self) -> &[ScanError] {
+    pub fn attempts(&self) -> &[ParseError] {
         &self.attempts
     }
 }
@@ -830,15 +832,15 @@ mod tests {
         let kind = |name: &str| book().scan(name).unwrap_err().kind;
         assert_eq!(
             kind("publishers/p1/books"),
-            ScanErrorKind::SegmentCount { want: 4, got: 3 }
+            ParseErrorKind::SegmentCount { want: 4, got: 3 }
         );
         assert_eq!(
             kind("publishers/p1/books/b1/pages/g1"),
-            ScanErrorKind::SegmentCount { want: 4, got: 6 }
+            ParseErrorKind::SegmentCount { want: 4, got: 6 }
         );
         assert_eq!(
             kind("publishers/p1/shelves/s1"),
-            ScanErrorKind::Literal {
+            ParseErrorKind::Literal {
                 index: 2,
                 want: "books".to_owned(),
                 got: "shelves".to_owned(),
@@ -846,7 +848,7 @@ mod tests {
         );
         assert_eq!(
             kind("publishers//books/b1"),
-            ScanErrorKind::EmptyValue {
+            ParseErrorKind::EmptyValue {
                 index: 1,
                 name: "publisher".to_owned(),
             }
@@ -879,7 +881,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             error.kind(),
-            &ScanErrorKind::Prefix {
+            &ParseErrorKind::Prefix {
                 want: "//example.com/".to_owned(),
             }
         );
@@ -896,7 +898,7 @@ mod tests {
         let error = book()
             .scan_full("publishers/p1/books/b1", "example.com")
             .unwrap_err();
-        assert!(matches!(error.kind(), ScanErrorKind::Prefix { .. }));
+        assert!(matches!(error.kind(), ParseErrorKind::Prefix { .. }));
     }
 
     #[test]
@@ -934,7 +936,7 @@ mod tests {
         );
         assert_eq!(
             error.kind(),
-            &ScanErrorKind::InvalidValue {
+            &ParseErrorKind::InvalidValue {
                 name: "book".to_owned(),
                 reason: "invalid length: expected 36, found 10".to_owned(),
             }
