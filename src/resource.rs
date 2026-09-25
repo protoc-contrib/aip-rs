@@ -47,16 +47,28 @@ pub const WILDCARD: &str = "-";
 pub struct ResourcePattern {
     pattern: String,
     segments: Vec<Segment>,
+    /// How many of `segments` are variables, cached because every scan and
+    /// format checks its arity against it.
     variables: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Segment {
-    /// The literal text for a literal segment, or the variable name (without
-    /// braces) for a variable segment.
-    name: String,
-    /// Whether this segment captures a value.
-    variable: bool,
+enum Segment {
+    /// Text the name must match exactly.
+    Literal(String),
+    /// A segment that captures a value, by its variable name (without
+    /// braces).
+    Variable(String),
+}
+
+impl Segment {
+    /// The variable name, if this segment captures a value.
+    fn variable(&self) -> Option<&str> {
+        match self {
+            Self::Literal(_) => None,
+            Self::Variable(name) => Some(name),
+        }
+    }
 }
 
 impl ResourcePattern {
@@ -72,7 +84,8 @@ impl ResourcePattern {
     /// path-template syntax included — is rejected here rather than turning
     /// up later as a segment that nothing can name.
     ///
-    /// [`str::parse`] is the same thing and usually reads better.
+    /// [`str::parse`] and [`TryFrom<&str>`](TryFrom) are the same thing, and
+    /// usually read better.
     pub fn compile(pattern: &str) -> Result<Self, CompileError> {
         let error = |kind| CompileError {
             pattern: pattern.to_owned(),
@@ -81,49 +94,46 @@ impl ResourcePattern {
         if pattern.is_empty() {
             return Err(error(CompileErrorKind::EmptyPattern));
         }
-        let parts: Vec<&str> = pattern.split('/').collect();
-        let mut segments = Vec::with_capacity(parts.len());
-        let mut variables = 0;
-        for (index, part) in parts.into_iter().enumerate() {
+        let mut segments: Vec<Segment> = Vec::new();
+        for (index, part) in pattern.split('/').enumerate() {
+            let malformed = || error(CompileErrorKind::MalformedSegment(part.to_owned()));
             let Some(name) = part.strip_prefix('{') else {
                 if part.is_empty() {
                     return Err(error(CompileErrorKind::EmptySegment(index)));
                 }
-                if part.contains(['{', '}']) {
-                    return Err(error(CompileErrorKind::MalformedSegment(part.to_owned())));
+                if has_brace(part) {
+                    return Err(malformed());
                 }
                 if !is_collection_id(part) {
                     return Err(error(CompileErrorKind::InvalidLiteral(part.to_owned())));
                 }
-                segments.push(Segment {
-                    name: part.to_owned(),
-                    variable: false,
-                });
+                segments.push(Segment::Literal(part.to_owned()));
                 continue;
             };
             let Some(name) = name.strip_suffix('}') else {
-                return Err(error(CompileErrorKind::MalformedSegment(part.to_owned())));
+                return Err(malformed());
             };
             if name.is_empty() {
                 return Err(error(CompileErrorKind::EmptyVariableName(index)));
             }
-            if name.contains(['{', '}']) {
-                return Err(error(CompileErrorKind::MalformedSegment(part.to_owned())));
+            if has_brace(name) {
+                return Err(malformed());
             }
             if !is_variable_name(name) {
                 return Err(error(CompileErrorKind::InvalidVariableName(
                     name.to_owned(),
                 )));
             }
-            if segments.iter().any(|s| s.variable && s.name == name) {
+            // Linear, but a pattern has a handful of segments.
+            if segments
+                .iter()
+                .any(|segment| segment.variable() == Some(name))
+            {
                 return Err(error(CompileErrorKind::DuplicateVariable(name.to_owned())));
             }
-            segments.push(Segment {
-                name: name.to_owned(),
-                variable: true,
-            });
-            variables += 1;
+            segments.push(Segment::Variable(name.to_owned()));
         }
+        let variables = segments.iter().filter_map(Segment::variable).count();
         Ok(Self {
             pattern: pattern.to_owned(),
             segments,
@@ -145,10 +155,7 @@ impl ResourcePattern {
 
     /// Returns the variable segment names, in pattern order.
     pub fn variable_names(&self) -> impl Iterator<Item = &str> {
-        self.segments
-            .iter()
-            .filter(|segment| segment.variable)
-            .map(|segment| segment.name.as_str())
+        self.segments.iter().filter_map(Segment::variable)
     }
 
     /// Matches `name` against the pattern and returns its variable segments,
@@ -201,26 +208,31 @@ impl ResourcePattern {
         // single walk would leave the caller's destinations half-populated
         // when a later segment turns out not to match.
         for (index, (segment, part)) in self.segments.iter().zip(name.split('/')).enumerate() {
-            if segment.variable {
-                if part.is_empty() {
-                    return Err(error(ParseErrorKind::EmptyValue {
-                        index,
-                        name: segment.name.clone(),
-                    }));
+            match segment {
+                Segment::Literal(literal) => {
+                    if part != literal {
+                        return Err(error(ParseErrorKind::Literal {
+                            index,
+                            want: literal.clone(),
+                            got: part.to_owned(),
+                        }));
+                    }
                 }
-            } else if part != segment.name {
-                return Err(error(ParseErrorKind::Literal {
-                    index,
-                    want: segment.name.clone(),
-                    got: part.to_owned(),
-                }));
+                Segment::Variable(variable) => {
+                    if part.is_empty() {
+                        return Err(error(ParseErrorKind::EmptyValue {
+                            index,
+                            name: variable.clone(),
+                        }));
+                    }
+                }
             }
         }
         for (value, part) in values.iter_mut().zip(
             self.segments
                 .iter()
                 .zip(name.split('/'))
-                .filter(|(segment, _)| segment.variable)
+                .filter(|(segment, _)| matches!(segment, Segment::Variable(_)))
                 .map(|(_, part)| part),
         ) {
             *value = part;
@@ -301,8 +313,10 @@ impl ResourcePattern {
             + self
                 .segments
                 .iter()
-                .filter(|segment| !segment.variable)
-                .map(|segment| segment.name.len())
+                .map(|segment| match segment {
+                    Segment::Literal(literal) => literal.len(),
+                    Segment::Variable(_) => 0,
+                })
                 .sum::<usize>()
             + values
                 .iter()
@@ -314,11 +328,12 @@ impl ResourcePattern {
             if index > 0 {
                 out.push('/');
             }
-            if segment.variable {
-                out.push_str(values[next].as_ref());
-                next += 1;
-            } else {
-                out.push_str(&segment.name);
+            match segment {
+                Segment::Literal(literal) => out.push_str(literal),
+                Segment::Variable(_) => {
+                    out.push_str(values[next].as_ref());
+                    next += 1;
+                }
             }
         }
         out
@@ -400,6 +415,21 @@ impl FromStr for ResourcePattern {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::compile(s)
     }
+}
+
+impl TryFrom<&str> for ResourcePattern {
+    type Error = CompileError;
+
+    /// Compiles the pattern; see [`ResourcePattern::compile`].
+    fn try_from(pattern: &str) -> Result<Self, Self::Error> {
+        Self::compile(pattern)
+    }
+}
+
+/// Whether `text` contains a brace. Once a variable's single `{…}` wrapper is
+/// stripped, any brace left means the segment is unbalanced or nested.
+fn has_brace(text: &str) -> bool {
+    text.contains(['{', '}'])
 }
 
 /// Whether `literal` is an AIP-122 collection identifier: `camelCase`, which is
@@ -826,6 +856,10 @@ mod tests {
         assert_eq!(
             pattern.variable_names().collect::<Vec<_>>(),
             ["publisher", "book"]
+        );
+        assert_eq!(
+            ResourcePattern::try_from("publishers/{publisher}/books/{book}"),
+            Ok(pattern)
         );
     }
 
