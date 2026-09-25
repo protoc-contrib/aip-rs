@@ -1,67 +1,40 @@
 //! Runtime primitives for the Google API Improvement Proposals.
 //!
-//! This crate holds the parts of AIP support that are pure data manipulation:
-//! encoding a page token, parsing an `order_by`, matching a resource name
-//! against its pattern. Anything that needs to walk a protobuf message is
-//! generated instead — see the scope note in the README — which is why the
-//! crate has no dependencies at all, not even a protobuf runtime.
-//!
-//! The pieces compose into one List handler:
+//! This crate holds the part of AIP support that is pure data manipulation:
+//! matching a resource name against its pattern, and formatting one back.
+//! Anything that needs to walk a protobuf message is generated instead -- see
+//! the scope note in the README -- which is why the crate has no dependencies
+//! at all, not even a protobuf runtime.
 //!
 //! ```
-//! use aip::{OrderBy, PageToken};
+//! use aip::ResourcePattern;
 //!
-//! # struct Book { title: String }
-//! # fn query(_: &PageToken, _: &OrderBy, _: i32) -> Vec<Book> { Vec::new() }
-//! # fn handler(order_by: &str, page_token: &str, page_size: i32, checksum: u32)
-//! #     -> Result<(Vec<Book>, String), Box<dyn std::error::Error>> {
-//! let order_by: OrderBy = order_by.parse()?;
-//! order_by.validate_for_paths(["title", "create_time"])?;
-//! let token = PageToken::parse(page_token, checksum)?;
+//! let pattern: ResourcePattern = "publishers/{publisher}/books/{book}".parse()?;
 //!
-//! let books = query(&token, &order_by, page_size);
-//!
-//! let mut next_page_token = String::new();
-//! if books.len() == page_size as usize {
-//!     let last = books.last().expect("a full page is not empty");
-//!     next_page_token = token.next_cursor(vec![last.title.as_str().into()])?.encode();
-//! }
-//! # Ok((books, next_page_token))
-//! # }
+//! let ids = pattern.scan("publishers/p1/books/b1")?;
+//! assert_eq!(ids, ["p1", "b1"]);
+//! assert_eq!(pattern.format(&ids), "publishers/p1/books/b1");
+//! # Ok::<_, Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! # The AIPs implemented here
 //!
-//! - AIP-122 resource names — [`ResourcePattern`], [`ResourceName`]
-//! - AIP-132 ordering — [`OrderBy`]
-//! - AIP-158 pagination — [`PageToken`], [`CursorValue`]
-//!
-//! AIP-160 filtering is plain CEL, so the parser is whichever CEL crate the
-//! caller picked and this one contributes only the error type generated code
-//! reports with — see [`query`].
+//! - AIP-122 resource names -- [`ResourcePattern`], [`ResourceName`]
+//! - AIP-159 wildcards -- [`resource::WILDCARD`]
 //!
 //! # Names
 //!
 //! The crate is published as `aip-rs` because `aip` is taken on crates.io, but
-//! its library name is `aip`, so generated code reads `aip::PageToken`. Each
-//! AIP gets a module, and the type you reach for is re-exported at the crate
-//! root; the error types stay in their modules, where they are rarely named
-//! and easy to find.
+//! its library name is `aip`, so generated code reads `aip::ResourcePattern`.
+//! The type you reach for is re-exported at the crate root; the error types
+//! stay in [`resource`], where they are rarely named and easy to find.
 //!
 //! See <https://google.aip.dev>.
 
 #![deny(missing_docs)]
 
-mod wire;
-
-pub mod ordering;
-pub mod pagination;
-pub mod query;
 pub mod resource;
 
-pub use ordering::{OrderBy, OrderByField};
-pub use pagination::{CursorValue, PageToken};
-pub use query::QueryError;
 pub use resource::{ResourceName, ResourcePattern};
 
 // Not implemented here, deliberately:
@@ -69,8 +42,10 @@ pub use resource::{ResourceName, ResourcePattern};
 //   AIP-134 update_mask validation and AIP-203 field behavior are generated,
 //           because they need to walk — and in the OUTPUT_ONLY case mutate — a
 //           protobuf message, which buffa 0.9.1 offers no reflective path to.
-//   AIP-160 filter is plain CEL, so the runtime is the `cel` crate and this
-//           crate contributes nothing.
+//   AIP-132 order_by, AIP-158 page tokens and AIP-160 filter are the query
+//           layer's: what a List request may name, how it sorts and where a
+//           page resumes are decided where the query runs -- sqlx-query, for
+//           SQL -- and a second parser here could only disagree with it.
 //
 // The read-only halves of AIP-134 and AIP-203 could live here behind a buffa
 // feature; see the README.
