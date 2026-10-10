@@ -22,20 +22,24 @@ dependencies — not even a protobuf runtime.
 | --- | --- | --- | --- |
 | [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types | ✅ |
 | [159](https://google.aip.dev/159) | wildcard segments | `resource` | ✅ |
-| [134](https://google.aip.dev/134) | `update_mask` validation | **generated** | — |
-| [203](https://google.aip.dev/203) | field behavior | **generated** | — |
-| [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158), [160](https://google.aip.dev/160) | `order_by`, page tokens, `filter` | the query layer — see below | — |
+| [134](https://google.aip.dev/134) | `update_mask` expansion (`MUTABLE_PATHS`, `implied_update_mask`) | **generated** | — |
+| [134](https://google.aip.dev/134) | `update_mask` validation | protovalidate (`field_mask.in`) | — |
+| [203](https://google.aip.dev/203) | `OUTPUT_ONLY` clearing, `IMMUTABLE` changes | **generated** | — |
+| [203](https://google.aip.dev/203) | `REQUIRED` | protovalidate (`required`, `min_len`) | — |
+| [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
+| [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158) | `order_by`, page tokens | the query layer — see below | — |
 
 ## Scope: what is deliberately not here
 
-**List queries.** `order_by`, page tokens and `filter` are the query layer's.
-Which fields a List request may name is the mapping from AIP paths to columns,
-a filter is only as good as the query it becomes, and a page token is whatever
-the pager resumes from — a keyset cursor, not an offset. Decided anywhere else,
-they could only disagree with the query that runs, so they live where it runs:
-[sqlx-query](https://github.com/sqlx-contrib/sqlx-query) parses all three, for
-SQL. The Go predecessor's ordering and pagination, and the ~3,000 lines it
-carried to parse AIP-160's CEL-*like* grammar, have no counterpart here.
+**Ordering and paging.** `order_by` and page tokens are the query layer's: how
+a List request sorts is the columns the query orders by, and a page token is
+whatever the pager encodes in it. Decided anywhere else, they could only
+disagree with the query that runs —
+[sqlx-query](https://github.com/sqlx-contrib/sqlx-query) parses both, for SQL.
+A `filter` is plain CEL: `protoc-gen-rust-aip` generates its environment and a
+syntax check onto each List request, and needs nothing from this crate. The ~3,000
+lines the Go predecessor carried to parse AIP-160's CEL-*like* grammar have no
+counterpart here.
 
 **Mutating a protobuf message.** Clearing `OUTPUT_ONLY` fields is *generated*,
 because buffa 0.9.1 offers no reflective path to mutation at all:
@@ -54,14 +58,18 @@ walk instead — which it can do well, knowing the field list at codegen time:
 
 ```rust
 impl Collection {
-    fn clear_output_only(&mut self) { self.create_time = None; /* ... */ }
+    fn clear_output_only(&mut self) { self.create_time = Default::default(); /* ... */ }
 }
 ```
 
-Reads are a different matter. Validating `REQUIRED` fields and checking
-`update_mask` paths are both read-only, so they can live
-here and use `Reflectable` the way aip-go uses `protoreflect`. Revisit this
-if a buffa release lands `reflect_mut`.
+The read-only halves — the writable paths, the implied update mask, the
+`IMMUTABLE` changes — are generated too, rather than read through
+`Reflectable` here, so that field behavior has one mechanism, not two, and
+works with reflection off. Validating `REQUIRED` fields and `update_mask` paths
+is not this crate's at all: protovalidate's `required` and `field_mask.in`
+already run on every request. Revisit the split if a buffa release lands
+`reflect_mut` — then all of it could move here behind a `buffa` feature, the way
+aip-go does it with `protoreflect`.
 
 ## Reflect mode is not this crate's concern
 
