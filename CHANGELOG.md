@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/protoc-contrib/aip-rs/compare/v0.2.0...v0.3.0) (2026-10-12)
+
+
+### Features
+
+* add request-level FieldBehavior items and FieldPath ([#15](https://github.com/protoc-contrib/aip-rs/issues/15)) ([541dc2e](https://github.com/protoc-contrib/aip-rs/commit/541dc2e72f041bf48964b804c4ca0265a5abd5d5))
+
 ## [0.2.0](https://github.com/protoc-contrib/aip-rs/compare/v0.1.0...v0.2.0) (2026-10-12)
 
 
