@@ -9,9 +9,9 @@ use core::fmt;
 ///
 /// The Rust counterpart of Go's `protopath.Path`, carrying field names only: a
 /// caller that needs field numbers or types — to report a protovalidate
-/// violation, say — resolves them from its descriptor pool. It is what
-/// [`FieldBehavior::missing_required_request_paths`] returns, so a server can
-/// report an unset `REQUIRED` field of a batch entry under the entry's index.
+/// violation, say — resolves them from its descriptor pool. It is what a
+/// [`RequiredError`] holds, so a server can report an unset `REQUIRED` field of
+/// a batch entry under the entry's index.
 ///
 /// ```
 /// use aip::FieldPath;
@@ -20,7 +20,7 @@ use core::fmt;
 /// assert_eq!(path.to_string(), "requests[1].item.display_name");
 /// ```
 ///
-/// [`FieldBehavior::missing_required_request_paths`]: crate::FieldBehavior::missing_required_request_paths
+/// [`RequiredError`]: crate::RequiredError
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct FieldPath {
     steps: Vec<Step>,
@@ -54,11 +54,8 @@ impl FieldPath {
     }
 
     /// This path extended by `path`, which continues from where this one ends:
-    /// another [`FieldPath`], or a dotted path such as `address.city`, as
-    /// [`FieldBehavior::missing_required_paths`] returns it, read as one field
-    /// step per segment.
-    ///
-    /// [`FieldBehavior::missing_required_paths`]: crate::FieldBehavior::missing_required_paths
+    /// another [`FieldPath`], or a dotted path such as `address.city`, read as
+    /// one field step per segment.
     #[must_use]
     pub fn join(mut self, path: impl Into<Self>) -> Self {
         self.steps.extend(path.into().steps);
