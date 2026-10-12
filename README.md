@@ -24,11 +24,12 @@ code implements.
 | [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types | ✅ |
 | [159](https://google.aip.dev/159) | wildcard segments | `resource` | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` expansion (`MUTABLE_PATHS`, `implied_update_mask`) | `FieldBehavior` trait, **generated** impls | ✅ |
-| [134](https://google.aip.dev/134) | implying an omitted `update_mask` on an update or batch request (`imply_update_mask`) | `FieldBehavior` trait, **generated** impls | ✅ |
+| [133](https://google.aip.dev/133) | naming a create's resource from its id, minting the id when omitted (`imply_resource_name`) | `FieldBehavior` trait, **generated** impls | ✅ |
+| [134](https://google.aip.dev/134) | implying an omitted `update_mask` on an update or batch request (`imply_update_mask`; both via `imply_request`) | `FieldBehavior` trait, **generated** impls | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` validation | protovalidate (`field_mask.in`) | — |
-| [203](https://google.aip.dev/203) | `REQUIRED` on a resource's fields (`missing_required_paths`) | `FieldBehavior` trait, **generated** impls | ✅ |
-| [203](https://google.aip.dev/203) | `REQUIRED` across a create, update or batch request (`missing_required_request_paths`, reported as `FieldPath`s) | `FieldBehavior` trait, **generated** impls; `FieldPath` | ✅ |
-| [203](https://google.aip.dev/203) | `IMMUTABLE` changes (`changed_immutable_paths`), `OUTPUT_ONLY` / `INPUT_ONLY` clearing | `FieldBehavior` trait, **generated** impls | ✅ |
+| [203](https://google.aip.dev/203) | `REQUIRED` on a resource's fields (`validate_required_fields`) | `FieldBehavior` trait, **generated** impls; `RequiredError` | ✅ |
+| [203](https://google.aip.dev/203) | `REQUIRED` across a create, update or batch request (`validate_required`, each field a `FieldPath`) | `FieldBehavior` trait, **generated** impls; `RequiredError`, `FieldPath` | ✅ |
+| [203](https://google.aip.dev/203) | `IMMUTABLE` changes (`validate_immutable`), `OUTPUT_ONLY` / `INPUT_ONLY` clearing | `FieldBehavior` trait, **generated** impls; `ImmutableError` | ✅ |
 | [203](https://google.aip.dev/203) | `REQUIRED` on a request's own fields, value rules | protovalidate (`required`, `min_len`, …) | — |
 | [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
 | [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158) | `order_by`, page tokens | the query layer — see below | — |
@@ -67,16 +68,19 @@ impl aip::FieldBehavior for Collection {
 }
 ```
 
-The read-only halves — the writable paths, the implied update mask, the
-`IMMUTABLE` changes and the unset `REQUIRED` fields — are generated into the
-same impl rather than read through `Reflectable` here, so that field behavior
-has one mechanism, not two, and works with reflection off. The trait's defaults
-are the "nothing to do" answers, so one server layer over `T: FieldBehavior`
-handles every generated message; bring it into scope with
-`use aip::FieldBehavior;` where its methods are called.
+The read-only halves — the writable paths, the implied update mask and the
+`IMMUTABLE` and `REQUIRED` checks — are generated into the same impl rather
+than read through `Reflectable` here, so that field behavior has one mechanism,
+not two, and works with reflection off. The plugin implements the trait for
+every message it generates, and the trait's defaults are the "nothing to do"
+answers, so one server layer over `T: FieldBehavior` handles every request;
+bring it into scope with `use aip::FieldBehavior;` where its methods are
+called. The items are named after what they do: `validate_*` returns `Ok(())`
+or an error listing the fields that fail, `imply_*` fills in what a client may
+leave to the server, `clear_*` drops what one side of the wire may not see.
 
 `REQUIRED` on a resource's fields is checked by the generated
-`missing_required_paths` rather than by protovalidate:
+`validate_required_fields` rather than by protovalidate:
 a resource is shared by its create and update requests, a create must set a
 `REQUIRED` field and an update only when its mask names it, and a
 `buf.validate` rule on the resource cannot tell which request it is in.
@@ -84,27 +88,32 @@ protovalidate keeps a request's own fields, value rules and `update_mask`
 paths (`field_mask.in`).
 
 A server reads both per request rather than per resource. On every create,
-update and batch request the plugin also generates
-`missing_required_request_paths`, which applies the resource's check the way
-the method asks — every `REQUIRED` field on a create, only those the
-`update_mask` names on an update, each `requests[i]` entry of a batch on its
-own — and returns each unset field as a `FieldPath` from the request
-(`requests[1].item.display_name`), and `imply_update_mask`, which fills an
-omitted mask from the resource's `implied_update_mask`. One server layer then
-covers every request:
+update and batch request the plugin also generates `validate_required`, which
+applies the resource's check the way the method asks — every `REQUIRED` field
+on a create, only those the `update_mask` names on an update, each
+`requests[i]` entry of a batch on its own — and reports each unset field as a
+`FieldPath` from the request (`requests[1].item.display_name`) in a
+`RequiredError`. It also generates what AIP leaves to the server:
+`imply_resource_name` on a create, which mints an omitted `<resource>_id` and
+builds the resource's `name` from its pattern, `parent` and that id, and
+`imply_update_mask` on an update, which fills an omitted mask from the
+resource's `implied_update_mask`; `imply_request` runs both. One server layer
+then covers every request:
 
 ```rust
 use aip::FieldBehavior;
 
 request.clear_output_only();
-request.imply_update_mask();
-for path in request.missing_required_request_paths() {
-    // a `required` violation at `path`
+request.imply_request(&mut || uuid::Uuid::now_v7().to_string());
+if let Err(error) = request.validate_required() {
+    for path in &error.paths {
+        // a `required` violation at `path`
+    }
 }
 ```
 
-aip-go's `MissingRequiredRequestPaths` and `ImplyUpdateMask` answer the same,
-by reflection. Revisit the split if a buffa release lands
+aip-go's `ImplyRequest` and `ValidateRequired` answer the same, by
+reflection. Revisit the split if a buffa release lands
 `reflect_mut` — then all of it could move here behind a `buffa` feature, the way
 aip-go does it with `protoreflect`.
 
