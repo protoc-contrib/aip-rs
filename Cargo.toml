@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-description = "Runtime primitives for Google API Improvement Proposals: resource names."
+description = "Runtime primitives for Google API Improvement Proposals: resource names, and the field-behavior trait generated code implements."
 repository = "https://github.com/protoc-contrib/aip-rs"
-keywords = ["aip", "grpc", "protobuf", "resource-names"]
+keywords = ["aip", "grpc", "protobuf", "resource-names", "field-mask"]
 categories = ["parser-implementations", "network-programming"]
 # What a consumer builds from. CI, Nix and the pinned toolchain are this
 # repository's, not the crate's.

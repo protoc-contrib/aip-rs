@@ -16,16 +16,18 @@ and the Rust counterpart of
 ## Status
 
 The one module that is pure data manipulation is implemented, with no
-dependencies — not even a protobuf runtime.
+dependencies — not even a protobuf runtime — along with the traits generated
+code implements.
 
 | AIP | Concept | Where it lives | |
 | --- | --- | --- | --- |
 | [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types | ✅ |
 | [159](https://google.aip.dev/159) | wildcard segments | `resource` | ✅ |
-| [134](https://google.aip.dev/134) | `update_mask` expansion (`MUTABLE_PATHS`, `implied_update_mask`) | **generated** | — |
+| [134](https://google.aip.dev/134) | `update_mask` expansion (`MUTABLE_PATHS`, `implied_update_mask`) | `FieldBehavior` trait, **generated** impls | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` validation | protovalidate (`field_mask.in`) | — |
-| [203](https://google.aip.dev/203) | `OUTPUT_ONLY` clearing, `IMMUTABLE` changes | **generated** | — |
-| [203](https://google.aip.dev/203) | `REQUIRED` | protovalidate (`required`, `min_len`) | — |
+| [203](https://google.aip.dev/203) | `REQUIRED` on a resource's fields (`missing_required_paths`) | `FieldBehavior` trait, **generated** impls | ✅ |
+| [203](https://google.aip.dev/203) | `IMMUTABLE` changes (`changed_immutable_paths`), `OUTPUT_ONLY` / `INPUT_ONLY` clearing | `FieldBehavior` trait, **generated** impls | ✅ |
+| [203](https://google.aip.dev/203) | `REQUIRED` on a request's own fields, value rules | protovalidate (`required`, `min_len`, …) | — |
 | [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
 | [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158) | `order_by`, page tokens | the query layer — see below | — |
 
@@ -54,20 +56,30 @@ fn reflect(&self) -> ReflectCow<'_>;
 `Reflectable` hands out an immutable handle in either reflect mode.
 `ReflectMessage::clear()` exists, but reaching it needs a
 `&mut dyn ReflectMessage` that nothing produces. So the generator emits the
-walk instead — which it can do well, knowing the field list at codegen time:
+walk instead — which it can do well, knowing the field list at codegen time —
+as an implementation of this crate's `FieldBehavior` trait:
 
 ```rust
-impl Collection {
+impl aip::FieldBehavior for Collection {
     fn clear_output_only(&mut self) { self.create_time = Default::default(); /* ... */ }
 }
 ```
 
 The read-only halves — the writable paths, the implied update mask, the
-`IMMUTABLE` changes — are generated too, rather than read through
-`Reflectable` here, so that field behavior has one mechanism, not two, and
-works with reflection off. Validating `REQUIRED` fields and `update_mask` paths
-is not this crate's at all: protovalidate's `required` and `field_mask.in`
-already run on every request. Revisit the split if a buffa release lands
+`IMMUTABLE` changes and the unset `REQUIRED` fields — are generated into the
+same impl rather than read through `Reflectable` here, so that field behavior
+has one mechanism, not two, and works with reflection off. The trait's defaults
+are the "nothing to do" answers, so one server layer over `T: FieldBehavior`
+handles every generated message; bring it into scope with
+`use aip::FieldBehavior;` where its methods are called.
+
+`REQUIRED` on a resource's fields is checked by the generated
+`missing_required_paths` rather than by protovalidate:
+a resource is shared by its create and update requests, a create must set a
+`REQUIRED` field and an update only when its mask names it, and a
+`buf.validate` rule on the resource cannot tell which request it is in.
+protovalidate keeps a request's own fields, value rules and `update_mask`
+paths (`field_mask.in`). Revisit the split if a buffa release lands
 `reflect_mut` — then all of it could move here behind a `buffa` feature, the way
 aip-go does it with `protoreflect`.
 
