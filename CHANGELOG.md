@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/protoc-contrib/aip-rs/compare/v0.1.0...v0.2.0) (2026-10-12)
+
+
+### Features
+
+* add the FieldBehavior trait generated code implements ([#13](https://github.com/protoc-contrib/aip-rs/issues/13)) ([6dc7a18](https://github.com/protoc-contrib/aip-rs/commit/6dc7a18d0414305936ce1eb7747fe64e37827b73))
+
 ## 0.1.0 (2026-09-25)
 
 
