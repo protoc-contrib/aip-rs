@@ -101,6 +101,7 @@ pub trait FieldBehavior {
     /// `update_mask` when it is empty. Empty by default.
     ///
     /// See <https://google.aip.dev/134#field-masks>.
+    #[must_use]
     fn implied_update_mask(&self) -> Vec<&'static str> {
         Vec::new()
     }
@@ -142,6 +143,7 @@ pub trait FieldBehavior {
     /// Empty by default: nothing is `REQUIRED`.
     ///
     /// See <https://google.aip.dev/203#required>.
+    #[must_use]
     fn missing_required_paths(&self, _mask: Option<&[String]>) -> Vec<&'static str> {
         Vec::new()
     }
@@ -165,6 +167,7 @@ pub trait FieldBehavior {
     /// Empty by default: nothing is `IMMUTABLE`.
     ///
     /// See <https://google.aip.dev/203#immutable>.
+    #[must_use]
     fn changed_immutable_paths(&self, _existing: &Self) -> Vec<&'static str> {
         Vec::new()
     }
