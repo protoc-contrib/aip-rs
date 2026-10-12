@@ -3,9 +3,10 @@
 //! This crate holds the part of AIP support that is pure data manipulation:
 //! matching a resource name against its pattern, and formatting one back. It
 //! also declares the traits generated code implements -- [`ResourceName`] and
-//! [`FieldBehavior`] -- while anything that needs to walk a protobuf message is
-//! generated instead (see the scope note in the README), which is why the crate
-//! has no dependencies at all, not even a protobuf runtime.
+//! [`FieldBehavior`] -- and the [`FieldPath`] the latter reports with, while
+//! anything that needs to walk a protobuf message is generated instead (see
+//! the scope note in the README), which is why the crate has no dependencies
+//! at all, not even a protobuf runtime.
 //!
 //! ```
 //! use aip::ResourcePattern;
@@ -23,7 +24,8 @@
 //! - AIP-122 resource names -- [`ResourcePattern`], [`ResourceName`]
 //! - AIP-159 wildcards -- [`resource::WILDCARD`]
 //! - AIP-134 update masks and AIP-203 field behavior -- [`FieldBehavior`],
-//!   implemented by generated code
+//!   implemented by generated code, with [`FieldPath`] naming the fields a
+//!   request leaves unset
 //!
 //! # Names
 //!
@@ -37,9 +39,11 @@
 #![deny(missing_docs)]
 
 pub mod field_behavior;
+pub mod field_path;
 pub mod resource;
 
 pub use field_behavior::FieldBehavior;
+pub use field_path::FieldPath;
 pub use resource::{ResourceName, ResourcePattern};
 
 // Not implemented here, deliberately:
