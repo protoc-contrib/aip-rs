@@ -24,8 +24,10 @@ code implements.
 | [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types | ✅ |
 | [159](https://google.aip.dev/159) | wildcard segments | `resource` | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` expansion (`MUTABLE_PATHS`, `implied_update_mask`) | `FieldBehavior` trait, **generated** impls | ✅ |
+| [134](https://google.aip.dev/134) | implying an omitted `update_mask` on an update or batch request (`imply_update_mask`) | `FieldBehavior` trait, **generated** impls | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` validation | protovalidate (`field_mask.in`) | — |
 | [203](https://google.aip.dev/203) | `REQUIRED` on a resource's fields (`missing_required_paths`) | `FieldBehavior` trait, **generated** impls | ✅ |
+| [203](https://google.aip.dev/203) | `REQUIRED` across a create, update or batch request (`missing_required_request_paths`, reported as `FieldPath`s) | `FieldBehavior` trait, **generated** impls; `FieldPath` | ✅ |
 | [203](https://google.aip.dev/203) | `IMMUTABLE` changes (`changed_immutable_paths`), `OUTPUT_ONLY` / `INPUT_ONLY` clearing | `FieldBehavior` trait, **generated** impls | ✅ |
 | [203](https://google.aip.dev/203) | `REQUIRED` on a request's own fields, value rules | protovalidate (`required`, `min_len`, …) | — |
 | [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
@@ -79,7 +81,30 @@ a resource is shared by its create and update requests, a create must set a
 `REQUIRED` field and an update only when its mask names it, and a
 `buf.validate` rule on the resource cannot tell which request it is in.
 protovalidate keeps a request's own fields, value rules and `update_mask`
-paths (`field_mask.in`). Revisit the split if a buffa release lands
+paths (`field_mask.in`).
+
+A server reads both per request rather than per resource. On every create,
+update and batch request the plugin also generates
+`missing_required_request_paths`, which applies the resource's check the way
+the method asks — every `REQUIRED` field on a create, only those the
+`update_mask` names on an update, each `requests[i]` entry of a batch on its
+own — and returns each unset field as a `FieldPath` from the request
+(`requests[1].item.display_name`), and `imply_update_mask`, which fills an
+omitted mask from the resource's `implied_update_mask`. One server layer then
+covers every request:
+
+```rust
+use aip::FieldBehavior;
+
+request.clear_output_only();
+request.imply_update_mask();
+for path in request.missing_required_request_paths() {
+    // a `required` violation at `path`
+}
+```
+
+aip-go's `MissingRequiredRequestPaths` and `ImplyUpdateMask` answer the same,
+by reflection. Revisit the split if a buffa release lands
 `reflect_mut` — then all of it could move here behind a `buffa` feature, the way
 aip-go does it with `protoreflect`.
 
