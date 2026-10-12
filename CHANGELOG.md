@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/protoc-contrib/aip-rs/compare/v0.3.0...v0.4.0) (2026-10-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* missing_required_request_paths, missing_required_paths and changed_immutable_paths are removed in favour of validate_required, validate_required_fields and validate_immutable, which return Result<(), RequiredError> / Result<(), ImmutableError>.
+
+### Features
+
+* validate_* and imply_* field behavior, with RequiredError and ImmutableError ([#17](https://github.com/protoc-contrib/aip-rs/issues/17)) ([c0798c3](https://github.com/protoc-contrib/aip-rs/commit/c0798c35a9e750cc770bb64e89653f997f46c23b))
+
 ## [0.3.0](https://github.com/protoc-contrib/aip-rs/compare/v0.2.0...v0.3.0) (2026-10-12)
 
 
