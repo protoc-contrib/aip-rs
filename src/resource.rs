@@ -536,6 +536,54 @@ pub trait ResourceName: fmt::Display {
     }
 }
 
+/// A message that declares `google.api.resource` (AIP-123): what a resource
+/// adds to the [`FieldBehavior`] every generated message has.
+///
+/// Implemented by `protoc-gen-rust-aip` for every resource message. Its name's
+/// type, pattern, validation and formatting live on [`Self::Name`], the
+/// generated [`ResourceName`] type; this trait links a resource to it, and
+/// reads the field mask an update of it implies.
+///
+/// ```ignore
+/// let name: ItemName = item.parse_name()?;
+/// if update_mask.paths.is_empty() {
+///     item.clear_fields(FieldBehaviorKind::OutputOnly);
+///     update_mask = item.implied_field_mask();
+/// }
+/// ```
+///
+/// [`FieldBehavior`]: crate::FieldBehavior
+pub trait Resource: crate::FieldBehavior {
+    /// The resource's typed name, e.g. `ItemName`.
+    type Name: ResourceName + FromStr<Err: core::error::Error + Send + Sync + 'static>;
+
+    /// The `IDENTIFIER` field, `name` (AIP-122), parsed into the typed name.
+    ///
+    /// # Errors
+    ///
+    /// The typed name's parse error, when `name` does not match its pattern.
+    fn parse_name(&self) -> Result<Self::Name, <Self::Name as FromStr>::Err>;
+
+    /// The field mask AIP-134 implies when an update omits one: every field an
+    /// update may write — not `OUTPUT_ONLY`, `IDENTIFIER` or `IMMUTABLE` — that
+    /// this value sets, in declaration order.
+    ///
+    /// Set is protobuf presence: a field with explicit presence — `optional`, a
+    /// message, a oneof member — when present, even at its zero value; any
+    /// other scalar when not its zero value; a repeated field or a map when not
+    /// empty. So a zero value without explicit presence is never implied: a
+    /// client clears one with an explicit mask, or the schema makes the field
+    /// `optional`.
+    ///
+    /// A set message field is implied whole — `carrier`, not `carrier.name` —
+    /// so the update writes everything beneath it, nested `OUTPUT_ONLY` values
+    /// included. Clear, then imply: clear `OUTPUT_ONLY` fields first.
+    ///
+    /// See <https://google.aip.dev/134#field-masks>.
+    #[must_use]
+    fn implied_field_mask(&self) -> buffa_types::FieldMask;
+}
+
 /// Why a resource name pattern could not be compiled.
 ///
 /// A bad pattern is a codegen or programming error, not anything a request can
