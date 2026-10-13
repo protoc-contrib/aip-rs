@@ -4,7 +4,7 @@ version = "0.4.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-description = "Runtime primitives for Google API Improvement Proposals: resource names, and the field-behavior and resource traits generated code implements."
+description = "Runtime primitives for Google API Improvement Proposals: resource names, the field-behavior and resource traits generated code implements, and a Connect interceptor applying them."
 repository = "https://github.com/protoc-contrib/aip-rs"
 keywords = ["aip", "grpc", "protobuf", "resource-names", "field-mask"]
 categories = ["parser-implementations", "network-programming"]
@@ -25,10 +25,31 @@ name = "aip"
 buffa-types = "0.9"
 # Behind `descriptor`: google.api.field_behavior read off a descriptor pool's
 # fields, for code that works from descriptors rather than generated types.
+# Behind `connect` too, for the messages the interceptor decodes.
 buffa = { version = "0.9.2", optional = true }
 buffa-descriptor = { version = "0.9.2", optional = true }
+# Behind `connect`: the FieldBehaviorInterceptor. connectrpc without its default
+# features, so its JSON bounds are the consumer's to switch on -- empty bounds
+# without `json`, serde with it, which buffa's generated messages then carry.
+connectrpc = { version = "0.9", default-features = false, optional = true }
+futures-util = { version = "0.3", optional = true }
+# Its default `connect` feature is what renders violations as a Connect error.
+protovalidate-buffa = { version = "0.7.2", optional = true }
+# A create's server-assigned id, a UUIDv7 so ids sort by creation time.
+uuid = { version = "1", features = ["v7"], optional = true }
 
 [features]
+default = ["connect"]
+# FieldBehaviorInterceptor and what it is built from: Procedure, ResourceWrites,
+# DynResource. On by default; `default-features = false` drops connectrpc,
+# protovalidate-buffa and uuid for a consumer that does not serve Connect.
+connect = [
+    "dep:buffa",
+    "dep:connectrpc",
+    "dep:futures-util",
+    "dep:protovalidate-buffa",
+    "dep:uuid",
+]
 # FieldDescriptorExt: a buffa-descriptor FieldDescriptor's FieldBehaviorSet.
 descriptor = ["dep:buffa", "dep:buffa-descriptor"]
 
