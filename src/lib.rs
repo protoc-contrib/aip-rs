@@ -7,9 +7,11 @@
 //! resource -- and the [`FieldBehaviorKind`], [`FieldScope`], [`FieldPath`]
 //! (each field with its number and [`FieldType`]) and [`FieldBehaviorError`]
 //! they work with. Anything that needs to walk a protobuf message is generated
-//! instead (see the scope note in the README), so the crate's one dependency
-//! is `buffa-types`, for the `FieldMask` a resource implies; the optional
-//! `descriptor` feature adds buffa-descriptor.
+//! instead (see the scope note in the README). Behind the default `connect`
+//! feature, [`FieldBehaviorInterceptor`] applies them at a Connect server's
+//! boundary; without it the crate's one dependency is `buffa-types`, for the
+//! `FieldMask` a resource implies. The optional `descriptor` feature adds
+//! buffa-descriptor.
 //!
 //! ```
 //! use aip::ResourcePattern;
@@ -34,6 +36,11 @@
 //! - [`FieldBehaviorSet`] -- a set of kinds, e.g. what one field is annotated
 //!   with; with the `descriptor` feature, `FieldDescriptorExt::field_behaviors`
 //!   reads it off a buffa-descriptor `FieldDescriptor`
+//! - AIP-133, AIP-134, AIP-233 and AIP-235 standard methods -- with the
+//!   `connect` feature, [`ResourceWrites`] says which resources a request
+//!   writes, and [`FieldBehaviorInterceptor`] applies the server's policy to
+//!   them: clearing, filling in a create's omitted id, implying an update's
+//!   mask, and checking `REQUIRED` per method with protovalidate's rules
 //!
 //! # Names
 //!
@@ -46,12 +53,18 @@
 
 #![deny(missing_docs)]
 
+#[cfg(feature = "connect")]
+pub mod connect;
 #[cfg(feature = "descriptor")]
 pub mod descriptor;
 pub mod field_behavior;
 pub mod field_path;
 pub mod resource;
 
+#[cfg(feature = "connect")]
+pub use connect::{
+    DynResource, FieldBehaviorInterceptor, Procedure, ResourceWrite, ResourceWrites, WriteMethod,
+};
 #[cfg(feature = "descriptor")]
 pub use descriptor::FieldDescriptorExt;
 pub use field_behavior::{
@@ -69,10 +82,10 @@ pub use resource::{Resource, ResourceName, ResourcePattern};
 //           and the read-only check is generated alongside, so field behavior
 //           has one mechanism. Which operation a service applies, with which
 //           kind, to which message, is its own policy.
-//   AIP-133/134 request handling -- naming a create's resource, implying an
+//   AIP-133/134 request handling -- filling in a create's id, implying an
 //           update's mask, checking REQUIRED per method across a batch -- is
-//           built on these traits by the caller, not here: this crate works on
-//           one message at a time.
+//           the `connect` feature's, an opinionated policy built on these
+//           traits; the traits themselves work on one message at a time.
 //   AIP-134 update_mask validation is protovalidate's (`field_mask.in`), as
 //           are a request's own REQUIRED fields and value rules.
 //   AIP-160 filter is plain CEL; the plugin generates its environment.

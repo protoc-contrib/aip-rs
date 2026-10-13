@@ -486,6 +486,45 @@ impl fmt::Display for FieldBehaviorError {
 
 impl core::error::Error for FieldBehaviorError {}
 
+/// `FieldBehavior` for the well-known types buffa-types generates: none of
+/// their fields is annotated, so the defaults are theirs, and a procedure that
+/// takes or returns one -- `google.protobuf.Empty`, say -- is handled like any
+/// other.
+macro_rules! well_known {
+    ($($ty:ident),* $(,)?) => {
+        $(impl FieldBehavior for buffa_types::google::protobuf::$ty {})*
+    };
+}
+
+well_known!(
+    Any,
+    Api,
+    BoolValue,
+    BytesValue,
+    DoubleValue,
+    Duration,
+    Empty,
+    Enum,
+    EnumValue,
+    Field,
+    FieldMask,
+    FloatValue,
+    Int32Value,
+    Int64Value,
+    ListValue,
+    Method,
+    Mixin,
+    Option,
+    SourceContext,
+    StringValue,
+    Struct,
+    Timestamp,
+    Type,
+    UInt32Value,
+    UInt64Value,
+    Value,
+);
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -652,6 +691,23 @@ mod tests {
         behavior.clear_fields(FieldBehaviorKind::OutputOnly);
         assert_eq!(
             behavior.validate_fields(FieldBehaviorKind::Required, FieldScope::All),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_well_known_type_has_the_defaults() {
+        let mut empty = buffa_types::Empty::default();
+        empty.clear_fields(FieldBehaviorKind::OutputOnly);
+        let mut mask = buffa_types::FieldMask {
+            paths: vec!["title".to_owned()],
+            ..Default::default()
+        };
+        mask.clear_fields(FieldBehaviorKind::OutputOnly);
+        assert_eq!(mask.paths, ["title"]);
+        assert_eq!(
+            buffa_types::Timestamp::default()
+                .validate_fields(FieldBehaviorKind::Required, FieldScope::All),
             Ok(())
         );
     }

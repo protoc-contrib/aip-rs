@@ -16,12 +16,16 @@ and the Rust counterpart of
 ## Status
 
 The one module that is pure data manipulation is implemented, along with the
-traits generated code implements. The only dependency is `buffa-types`, for
-the `FieldMask` a resource implies. The optional `descriptor` feature adds
-buffa-descriptor, to read `google.api.field_behavior` off a descriptor pool's
-fields as a `FieldBehaviorSet`:
+traits generated code implements and, behind the default `connect` feature,
+the Connect interceptor that applies them at an RPC boundary. Without
+`connect` the only dependency is `buffa-types`, for the `FieldMask` a
+resource implies. The optional `descriptor` feature adds buffa-descriptor, to
+read `google.api.field_behavior` off a descriptor pool's fields as a
+`FieldBehaviorSet`:
 
 ```toml
+aip = { package = "aip-rs", version = "0.5" }                                   # with the interceptor
+aip = { package = "aip-rs", version = "0.5", default-features = false }         # primitives only
 aip = { package = "aip-rs", version = "0.5", features = ["descriptor"] }
 ```
 
@@ -36,9 +40,50 @@ aip = { package = "aip-rs", version = "0.5", features = ["descriptor"] }
 | [203](https://google.aip.dev/203) | checking the fields of a behavior within a scope (`validate_fields`), e.g. `REQUIRED` — all on a create, those the mask names on an update | `FieldBehavior` trait, **generated** impls; `FieldBehaviorError`, `FieldPath` (each field with its number and `FieldType`, as protovalidate reports a violation's path) | ✅ |
 | [203](https://google.aip.dev/203) | a behavior's `google.api.FieldBehavior` number (`TryFrom<i32>`/`From<FieldBehaviorKind> for i32`, `UnknownFieldBehavior`); a set of behaviors (`FieldBehaviorSet`); a descriptor field's behaviors (`FieldDescriptorExt`, `descriptor` feature) | `field_behavior`, `descriptor` | ✅ |
 | [203](https://google.aip.dev/203) | `REQUIRED` on a request's own fields, value rules | protovalidate (`required`, `min_len`, …) | — |
-| [133](https://google.aip.dev/133), [134](https://google.aip.dev/134) | handling a whole request — naming a create's resource, implying an update's mask, checking each batch entry | the caller, built on these traits | — |
+| [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [233](https://google.aip.dev/233), [235](https://google.aip.dev/235) | a standard-method request's shape — the resources a create, update or batch writes (`ResourceWrites`, `ResourceWrite`, `WriteMethod`, `DynResource`) | `connect`, **generated** impls | ✅ |
+| [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [203](https://google.aip.dev/203) | the server's policy at the RPC boundary — clear `OUTPUT_ONLY`/`INPUT_ONLY`, fill in a create's omitted id, imply an update's mask, check `REQUIRED` per method with protovalidate's rules (`FieldBehaviorInterceptor`, `Procedure`, `prepare`) | `connect` (default feature); `PROCEDURES` **generated** | ✅ |
 | [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
 | [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158) | `order_by`, page tokens | the query layer — see below | — |
+
+## The interceptor
+
+`FieldBehaviorInterceptor` applies AIP field behavior on a Connect server, with
+nothing to configure — the Rust counterpart of aip-go's
+`NewFieldBehaviorInterceptor`:
+
+| RPC | Inbound | Outbound |
+| --- | --- | --- |
+| unary | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`; validate `REQUIRED` — every field on a create, those the mask names on an update — with protovalidate's rules, into one `InvalidArgument` | clear `INPUT_ONLY` |
+| streaming | clear `OUTPUT_ONLY` on every message | clear `INPUT_ONLY` on every message |
+
+```rust
+let service = ConnectRpcService::new(router)
+    .with_interceptor(aip::FieldBehaviorInterceptor::new(sdk::v1::PROCEDURES));
+```
+
+An interceptor sees bytes, not types, so it is handed the `PROCEDURES` table
+protoc-gen-rust-aip generates per package: one `Procedure` per method, whose
+`inbound` and `outbound` steps decode each message as its own type. It edits
+the messages it passes on, the outbound ones included, and leaves a client's
+calls alone. Every message buffa and protoc-gen-rust-aip generate qualifies,
+the well-known types included (aip-rs gives them empty `FieldBehavior`
+impls), so a method taking `google.protobuf.Empty` needs nothing special.
+`aip::connect::prepare` applies the unary steps to a request a caller holds, as a
+handler test does.
+
+**Names are the server's.** AIP-133 has the server build a created resource's
+`name` from the request's `parent` and `<resource>_id`. The interceptor fills
+in only an omitted id; it writes no name and no parent. A handler reads both
+off the request — the generated `parse_<resource>_id` and `parse_parent` give
+them typed — stores the resource under the name they make, and returns the
+name storage holds. A service with another id scheme fills the id in with its
+own interceptor ahead of this one, through `ResourceWrites::for_each_write`:
+an id that is already set is kept.
+
+The public surface of `aip::connect` is that and no more:
+`FieldBehaviorInterceptor`, `Procedure` (`path`, `inbound`, `outbound`;
+`Procedure::unary`, `Procedure::streaming`), `ResourceWrites`, `ResourceWrite`,
+`WriteMethod`, `DynResource` (every `Resource` is one) and `prepare`.
 
 ## Scope: what is deliberately not here
 
