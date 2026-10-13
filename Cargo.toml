@@ -4,7 +4,7 @@ version = "0.4.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-description = "Runtime primitives for Google API Improvement Proposals: resource names, and the field-behavior trait generated code implements."
+description = "Runtime primitives for Google API Improvement Proposals: resource names, and the field-behavior and resource traits generated code implements."
 repository = "https://github.com/protoc-contrib/aip-rs"
 keywords = ["aip", "grpc", "protobuf", "resource-names", "field-mask"]
 categories = ["parser-implementations", "network-programming"]
@@ -20,5 +20,18 @@ include = ["src/**", "README.md", "LICENSE", "CHANGELOG.md"]
 name = "aip"
 
 [dependencies]
+# The owned google.protobuf.FieldMask that Resource::implied_field_mask returns,
+# the type generated code assigns to a request's update_mask.
+buffa-types = "0.9"
+# Behind `descriptor`: google.api.field_behavior read off a descriptor pool's
+# fields, for code that works from descriptors rather than generated types.
+buffa = { version = "0.9.2", optional = true }
+buffa-descriptor = { version = "0.9.2", optional = true }
+
+[features]
+# FieldDescriptorExt: a buffa-descriptor FieldDescriptor's FieldBehaviorSet.
+descriptor = ["dep:buffa", "dep:buffa-descriptor"]
 
 [dev-dependencies]
+# The descriptor feature's test builds a pool, which takes `reflect`.
+buffa-descriptor = { version = "0.9.2", features = ["reflect"] }

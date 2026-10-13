@@ -30,14 +30,21 @@ jobs:
       - name: Lint
         run: nix develop --command cargo clippy --all-targets -- -D warnings
 
+      # The `descriptor` feature is code the default build does not compile.
+      - name: Lint (all features)
+        run: nix develop --command cargo clippy --all-targets --all-features -- -D warnings
+
       - name: Run Tests
         run: nix develop --command cargo test
+
+      - name: Run Tests (all features)
+        run: nix develop --command cargo test --all-features
 
       # A library is read through its docs: every item documented, every
       # intra-doc link resolving, every example compiling -- the doc tests run
       # with the tests above.
       - name: Check Documentation
-        run: nix develop --command cargo doc --no-deps
+        run: nix develop --command cargo doc --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
 

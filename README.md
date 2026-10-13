@@ -15,22 +15,28 @@ and the Rust counterpart of
 
 ## Status
 
-The one module that is pure data manipulation is implemented, with no
-dependencies — not even a protobuf runtime — along with the traits generated
-code implements.
+The one module that is pure data manipulation is implemented, along with the
+traits generated code implements. The only dependency is `buffa-types`, for
+the `FieldMask` a resource implies. The optional `descriptor` feature adds
+buffa-descriptor, to read `google.api.field_behavior` off a descriptor pool's
+fields as a `FieldBehaviorSet`:
+
+```toml
+aip = { package = "aip-rs", version = "0.5", features = ["descriptor"] }
+```
 
 | AIP | Concept | Where it lives | |
 | --- | --- | --- | --- |
-| [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types | ✅ |
+| [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types (`ResourceName`) | ✅ |
+| [123](https://google.aip.dev/123) | a resource and its typed name (`Resource::Name`, `parse_name`) | `Resource` trait, **generated** impls | ✅ |
 | [159](https://google.aip.dev/159) | wildcard segments | `resource` | ✅ |
-| [134](https://google.aip.dev/134) | `update_mask` expansion (`MUTABLE_PATHS`, `implied_update_mask`) | `FieldBehavior` trait, **generated** impls | ✅ |
-| [133](https://google.aip.dev/133) | naming a create's resource from its id, minting the id when omitted (`imply_resource_name`) | `FieldBehavior` trait, **generated** impls | ✅ |
-| [134](https://google.aip.dev/134) | implying an omitted `update_mask` on an update or batch request (`imply_update_mask`; both via `imply_request`) | `FieldBehavior` trait, **generated** impls | ✅ |
+| [134](https://google.aip.dev/134) | the field mask an omitted `update_mask` implies (`implied_field_mask`) | `Resource` trait, **generated** impls | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` validation | protovalidate (`field_mask.in`) | — |
-| [203](https://google.aip.dev/203) | `REQUIRED` on a resource's fields (`validate_required_fields`) | `FieldBehavior` trait, **generated** impls; `RequiredError` | ✅ |
-| [203](https://google.aip.dev/203) | `REQUIRED` across a create, update or batch request (`validate_required`, each field a `FieldPath`) | `FieldBehavior` trait, **generated** impls; `RequiredError`, `FieldPath` | ✅ |
-| [203](https://google.aip.dev/203) | `IMMUTABLE` changes (`validate_immutable`), `OUTPUT_ONLY` / `INPUT_ONLY` clearing | `FieldBehavior` trait, **generated** impls; `ImmutableError` | ✅ |
+| [203](https://google.aip.dev/203) | clearing the fields of a behavior (`clear_fields`), e.g. `OUTPUT_ONLY` on input, `INPUT_ONLY` on output | `FieldBehavior` trait, **generated** impls | ✅ |
+| [203](https://google.aip.dev/203) | checking the fields of a behavior within a scope (`validate_fields`), e.g. `REQUIRED` — all on a create, those the mask names on an update | `FieldBehavior` trait, **generated** impls; `FieldBehaviorError`, `FieldPath` (each field with its number and `FieldType`, as protovalidate reports a violation's path) | ✅ |
+| [203](https://google.aip.dev/203) | a behavior's `google.api.FieldBehavior` number (`TryFrom<i32>`/`From<FieldBehaviorKind> for i32`, `UnknownFieldBehavior`); a set of behaviors (`FieldBehaviorSet`); a descriptor field's behaviors (`FieldDescriptorExt`, `descriptor` feature) | `field_behavior`, `descriptor` | ✅ |
 | [203](https://google.aip.dev/203) | `REQUIRED` on a request's own fields, value rules | protovalidate (`required`, `min_len`, …) | — |
+| [133](https://google.aip.dev/133), [134](https://google.aip.dev/134) | handling a whole request — naming a create's resource, implying an update's mask, checking each batch entry | the caller, built on these traits | — |
 | [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
 | [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158) | `order_by`, page tokens | the query layer — see below | — |
 
@@ -46,8 +52,8 @@ syntax check onto each List request, and needs nothing from this crate. The ~3,0
 lines the Go predecessor carried to parse AIP-160's CEL-*like* grammar have no
 counterpart here.
 
-**Mutating a protobuf message.** Clearing `OUTPUT_ONLY` fields is *generated*,
-because buffa 0.9.1 offers no reflective path to mutation at all:
+**Mutating a protobuf message.** Clearing fields is *generated*, because buffa
+0.9 offers no reflective path to mutation at all:
 
 ```rust
 fn reflect(&self) -> ReflectCow<'_>;
@@ -60,60 +66,70 @@ fn reflect(&self) -> ReflectCow<'_>;
 `ReflectMessage::clear()` exists, but reaching it needs a
 `&mut dyn ReflectMessage` that nothing produces. So the generator emits the
 walk instead — which it can do well, knowing the field list at codegen time —
-as an implementation of this crate's `FieldBehavior` trait:
+as an implementation of this crate's `FieldBehavior` trait. The read-only
+check and a resource's implied field mask are generated alongside rather than
+read through `Reflectable` here, so field behavior has one mechanism and works
+with reflection off:
 
 ```rust
-impl aip::FieldBehavior for Collection {
-    fn clear_output_only(&mut self) { self.create_time = Default::default(); /* ... */ }
-}
-```
+impl aip::FieldBehavior for Item {
+    fn clear_fields(&mut self, kind: aip::FieldBehaviorKind) {
+        if kind == aip::FieldBehaviorKind::OutputOnly {
+            self.parent.clear();
+            self.create_time = Default::default();
+        }
+    }
 
-The read-only halves — the writable paths, the implied update mask and the
-`IMMUTABLE` and `REQUIRED` checks — are generated into the same impl rather
-than read through `Reflectable` here, so that field behavior has one mechanism,
-not two, and works with reflection off. The plugin implements the trait for
-every message it generates, and the trait's defaults are the "nothing to do"
-answers, so one server layer over `T: FieldBehavior` handles every request;
-bring it into scope with `use aip::FieldBehavior;` where its methods are
-called. The items are named after what they do: `validate_*` returns `Ok(())`
-or an error listing the fields that fail, `imply_*` fills in what a client may
-leave to the server, `clear_*` drops what one side of the wire may not see.
-
-`REQUIRED` on a resource's fields is checked by the generated
-`validate_required_fields` rather than by protovalidate:
-a resource is shared by its create and update requests, a create must set a
-`REQUIRED` field and an update only when its mask names it, and a
-`buf.validate` rule on the resource cannot tell which request it is in.
-protovalidate keeps a request's own fields, value rules and `update_mask`
-paths (`field_mask.in`).
-
-A server reads both per request rather than per resource. On every create,
-update and batch request the plugin also generates `validate_required`, which
-applies the resource's check the way the method asks — every `REQUIRED` field
-on a create, only those the `update_mask` names on an update, each
-`requests[i]` entry of a batch on its own — and reports each unset field as a
-`FieldPath` from the request (`requests[1].item.display_name`) in a
-`RequiredError`. It also generates what AIP leaves to the server:
-`imply_resource_name` on a create, which mints an omitted `<resource>_id` and
-builds the resource's `name` from its pattern, `parent` and that id, and
-`imply_update_mask` on an update, which fills an omitted mask from the
-resource's `implied_update_mask`; `imply_request` runs both. One server layer
-then covers every request:
-
-```rust
-use aip::FieldBehavior;
-
-request.clear_output_only();
-request.imply_request(&mut || uuid::Uuid::now_v7().to_string());
-if let Err(error) = request.validate_required() {
-    for path in &error.paths {
-        // a `required` violation at `path`
+    fn validate_fields(&self, kind: aip::FieldBehaviorKind, scope: aip::FieldScope<'_>)
+        -> Result<(), aip::FieldBehaviorError>
+    {
+        let mut paths = Vec::new();
+        if kind == aip::FieldBehaviorKind::Required && scope.contains("display_name")
+            && self.display_name.is_empty()
+        {
+            paths.push(aip::FieldPath::field("display_name"));
+        }
+        aip::FieldBehaviorError::check(kind, paths)
     }
 }
+
+impl aip::Resource for Item {
+    type Name = ItemName;
+    fn parse_name(&self) -> Result<ItemName, aip::resource::ParseError> { self.name.parse() }
+    fn implied_field_mask(&self) -> buffa_types::FieldMask { /* the writable fields set */ }
+}
 ```
 
-aip-go's `ImplyRequest` and `ValidateRequired` answer the same, by
-reflection. Revisit the split if a buffa release lands
+The plugin implements `FieldBehavior` for every message it generates, and the
+defaults do nothing, so generic code over `T: FieldBehavior` works for any of
+them; `Resource` only for resources. Bring a trait into scope with
+`use aip::FieldBehavior;` where its methods are called.
+
+**Policy.** Every operation works on one message, with whatever
+`FieldBehaviorKind` the caller passes. Which a service applies — `OUTPUT_ONLY`
+cleared on requests, `INPUT_ONLY` on responses, `REQUIRED` checked with
+`FieldScope::All` on a create and the update's mask on an update, `IMMUTABLE`
+changes dropped or refused — and to which message of a request, is the
+caller's, as is walking a batch's entries:
+
+```rust
+use aip::{FieldBehavior, FieldBehaviorKind, FieldPath, FieldScope, FieldType, Resource};
+
+request.clear_fields(FieldBehaviorKind::OutputOnly);
+if let Some(item) = request.item.as_option() {
+    let mask = request.update_mask.as_option().map_or(&[][..], |mask| &mask.paths[..]);
+    item.validate_fields(FieldBehaviorKind::Required, FieldScope::Mask(mask))
+        .map_err(|error| error.prefixed(&FieldPath::field("item", 2, FieldType::Message)))?;
+}
+```
+
+`REQUIRED` on a resource's fields is checked here rather than by protovalidate:
+a resource is shared by its create and update requests, and a `buf.validate`
+rule on it cannot tell which request it is in. protovalidate keeps a request's
+own fields, value rules and `update_mask` paths (`field_mask.in`).
+
+aip-go answers the same by reflection, with `ClearFields`, `ValidateFields`
+and `ImpliedFieldMask`. Revisit the split if a buffa release lands
 `reflect_mut` — then all of it could move here behind a `buffa` feature, the way
 aip-go does it with `protoreflect`.
 
@@ -136,12 +152,12 @@ generated code reads `aip::ResourcePattern`:
 
 ```toml
 [dependencies]
-aip = { package = "aip-rs", version = "0.1" }
+aip = { package = "aip-rs", version = "0.5" }
 ```
 
 The minimum supported Rust version is 1.85, the first with edition 2024.
 
-The crate is pre-1.0: a breaking change bumps the minor version, so `0.1`
+The crate is pre-1.0: a breaking change bumps the minor version, so `0.5`
 above will not pick one up unasked.
 
 ## License
