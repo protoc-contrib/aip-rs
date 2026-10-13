@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/protoc-contrib/aip-rs/compare/v0.4.0...v0.5.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* FieldBehavior's MUTABLE_PATHS, implied_update_mask, imply_resource_name, imply_update_mask, imply_request, validate_required, validate_required_fields, validate_immutable, clear_output_only and clear_input_only are removed, as are RequiredError and ImmutableError. Use clear_fields(kind), validate_fields(kind, scope) and FieldBehaviorError, and Resource::implied_field_mask for the implied mask.
+
+### Features
+
+* FieldBehavior clears and validates by kind, and a Resource trait ([#19](https://github.com/protoc-contrib/aip-rs/issues/19)) ([2c5e7d6](https://github.com/protoc-contrib/aip-rs/commit/2c5e7d664dbda0cb5dc02cca741fed91f936f249))
+
 ## [0.4.0](https://github.com/protoc-contrib/aip-rs/compare/v0.3.0...v0.4.0) (2026-10-12)
 
 
