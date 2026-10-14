@@ -38,7 +38,7 @@
 //! - [`FieldBehaviorSet`] -- a set of kinds, e.g. what one field is annotated
 //!   with; with the `descriptor` feature, `FieldDescriptorExt::field_behaviors`
 //!   reads it off a buffa-descriptor `FieldDescriptor`
-//! - AIP-133, AIP-134, AIP-233 and AIP-235 standard methods -- with the
+//! - AIP-133, AIP-134, AIP-233 and AIP-234 standard methods -- with the
 //!   `connect` feature, [`ResourceWrites`] says which resources a request
 //!   writes, and [`FieldBehaviorInterceptor`] applies the server's policy to
 //!   them: clearing, filling in a create's omitted id, implying an update's
