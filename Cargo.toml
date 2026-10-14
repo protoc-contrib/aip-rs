@@ -56,3 +56,12 @@ descriptor = ["dep:buffa", "dep:buffa-descriptor"]
 [dev-dependencies]
 # The descriptor feature's test builds a pool, which takes `reflect`.
 buffa-descriptor = { version = "0.9.2", features = ["reflect"] }
+# tests/interceptor.rs serves requests through a ConnectRpcService in
+# process: an HTTP request built and sent with tower, its body read back,
+# and a stream of responses built with futures-util. All four are already in
+# connectrpc's tree.
+futures-util = "0.3"
+http = "1"
+http-body-util = "0.1"
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }
