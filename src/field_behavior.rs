@@ -185,6 +185,29 @@ impl FieldBehaviorSet {
     }
 }
 
+/// Writes the kinds in `google.api.FieldBehavior` order, space-separated in
+/// brackets -- `[REQUIRED IMMUTABLE]`, `[]` for none -- as aip-go's
+/// `FieldBehaviorSet.String` does.
+///
+/// ```
+/// use aip::FieldBehaviorKind;
+///
+/// let set = FieldBehaviorKind::Immutable | FieldBehaviorKind::Required;
+/// assert_eq!(set.to_string(), "[REQUIRED IMMUTABLE]");
+/// ```
+impl fmt::Display for FieldBehaviorSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        for (i, kind) in self.iter().enumerate() {
+            if i > 0 {
+                f.write_str(" ")?;
+            }
+            write!(f, "{kind}")?;
+        }
+        f.write_str("]")
+    }
+}
+
 impl From<FieldBehaviorKind> for FieldBehaviorSet {
     fn from(kind: FieldBehaviorKind) -> Self {
         Self(kind.bit())
@@ -464,16 +487,12 @@ impl FieldBehaviorError {
     }
 }
 
-/// Writes `REQUIRED fields are unset: item.display_name, item.quantity`, the
-/// verb depending on the behavior.
+/// Writes `REQUIRED fields are unset: item.display_name, item.quantity`, as
+/// aip-go's `FieldBehaviorError` does. "Unset" for every kind, as that is what
+/// [`FieldBehavior::validate_fields`] checks of each.
 impl fmt::Display for FieldBehaviorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let failure = match self.kind {
-            FieldBehaviorKind::Required => "are unset",
-            FieldBehaviorKind::Immutable => "cannot change",
-            _ => "are not valid",
-        };
-        write!(f, "{} fields {failure}: ", self.kind)?;
+        write!(f, "{} fields are unset: ", self.kind)?;
         for (i, path) in self.paths.iter().enumerate() {
             if i > 0 {
                 f.write_str(", ")?;
@@ -528,7 +547,8 @@ well_known!(
 #[cfg(test)]
 mod tests {
     use super::{
-        FieldBehavior, FieldBehaviorError, FieldBehaviorKind, FieldScope, UnknownFieldBehavior,
+        FieldBehavior, FieldBehaviorError, FieldBehaviorKind, FieldBehaviorSet, FieldScope,
+        UnknownFieldBehavior,
     };
     use crate::{FieldPath, FieldType};
 
@@ -668,17 +688,37 @@ mod tests {
     }
 
     #[test]
+    fn a_set_reads_its_kinds_in_enum_order() {
+        assert_eq!(FieldBehaviorSet::empty().to_string(), "[]");
+        assert_eq!(
+            FieldBehaviorSet::from(FieldBehaviorKind::OutputOnly).to_string(),
+            "[OUTPUT_ONLY]"
+        );
+        let set: FieldBehaviorSet = [
+            FieldBehaviorKind::Identifier,
+            FieldBehaviorKind::Immutable,
+            FieldBehaviorKind::Required,
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(set.to_string(), "[REQUIRED IMMUTABLE IDENTIFIER]");
+    }
+
+    #[test]
     fn the_message_reads_the_kind() {
         let immutable = FieldBehaviorError {
             kind: FieldBehaviorKind::Immutable,
             paths: vec![string("sku", 3)],
         };
-        assert_eq!(immutable.to_string(), "IMMUTABLE fields cannot change: sku");
+        assert_eq!(immutable.to_string(), "IMMUTABLE fields are unset: sku");
         let other = FieldBehaviorError {
             kind: FieldBehaviorKind::Identifier,
-            paths: vec![string("name", 1)],
+            paths: vec![string("name", 1), string("parent", 2)],
         };
-        assert_eq!(other.to_string(), "IDENTIFIER fields are not valid: name");
+        assert_eq!(
+            other.to_string(),
+            "IDENTIFIER fields are unset: name, parent"
+        );
     }
 
     #[test]
