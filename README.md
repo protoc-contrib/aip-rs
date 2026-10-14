@@ -35,6 +35,7 @@ aip = { package = "aip-rs", version = "0.5", features = ["descriptor"] }
 | [123](https://google.aip.dev/123) | a resource and its typed name (`Resource::Name`, `parse_name`) | `Resource` trait, **generated** impls | ✅ |
 | [159](https://google.aip.dev/159) | wildcard segments | `resource` | ✅ |
 | [134](https://google.aip.dev/134) | the field mask an omitted `update_mask` implies (`implied_field_mask`) | `Resource` trait, **generated** impls | ✅ |
+| [203](https://google.aip.dev/203#output-only) | `OUTPUT_ONLY` paths in an explicit `update_mask`, ignored (`clear_field_mask`: removes the paths that name, or pass through, a field of a behavior) | `Resource` trait, built on the generated `validate_fields` | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` validation | protovalidate (`field_mask.in`) | — |
 | [203](https://google.aip.dev/203) | clearing the fields of a behavior (`clear_fields`), e.g. `OUTPUT_ONLY` on input, `INPUT_ONLY` on output | `FieldBehavior` trait, **generated** impls | ✅ |
 | [203](https://google.aip.dev/203) | checking the fields of a behavior within a scope (`validate_fields`), e.g. `REQUIRED` — all on a create, those the mask names on an update | `FieldBehavior` trait, **generated** impls; `FieldBehaviorError`, `FieldPath` (each field with its number and `FieldType`, as protovalidate reports a violation's path) | ✅ |
@@ -53,7 +54,7 @@ nothing to configure — the Rust counterpart of aip-go's
 
 | RPC | Inbound | Outbound |
 | --- | --- | --- |
-| unary | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`; validate `REQUIRED` — every field on a create, those the mask names on an update — with protovalidate's rules, into one `InvalidArgument` | clear `INPUT_ONLY` |
+| unary | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one (`clear_field_mask`); validate `REQUIRED` — every field on a create, those the mask names on an update — with protovalidate's rules, into one `InvalidArgument` | clear `INPUT_ONLY` |
 | streaming | clear `OUTPUT_ONLY` on every message | clear `INPUT_ONLY` on every message |
 
 ```rust
@@ -162,6 +163,10 @@ use aip::{FieldBehavior, FieldBehaviorKind, FieldPath, FieldScope, FieldType, Re
 
 request.clear_fields(FieldBehaviorKind::OutputOnly);
 if let Some(item) = request.item.as_option() {
+    // an explicit mask ignores the OUTPUT_ONLY fields it names (AIP-203)
+    if let Some(mask) = request.update_mask.as_option_mut() {
+        item.clear_field_mask(FieldBehaviorKind::OutputOnly, mask);
+    }
     let mask = request.update_mask.as_option().map_or(&[][..], |mask| &mask.paths[..]);
     item.validate_fields(FieldBehaviorKind::Required, FieldScope::Mask(mask))
         .map_err(|error| error.prefixed(&FieldPath::field("item", 2, FieldType::Message)))?;
@@ -173,8 +178,11 @@ a resource is shared by its create and update requests, and a `buf.validate`
 rule on it cannot tell which request it is in. protovalidate keeps a request's
 own fields, value rules and `update_mask` paths (`field_mask.in`).
 
-aip-go answers the same by reflection, with `ClearFields`, `ValidateFields`
-and `ImpliedFieldMask`. Revisit the split if a buffa release lands
+aip-go answers the same by reflection, with `ClearFields`, `ValidateFields`,
+`ImpliedFieldMask` and `ClearFieldMask`. `clear_field_mask` needs nothing
+generated of its own: it runs the generated `validate_fields` on the
+resource's `Default`, where every field is unset, so the check reports the
+fields of a behavior a path names. Revisit the split if a buffa release lands
 `reflect_mut` — then all of it could move here behind a `buffa` feature, the way
 aip-go does it with `protoreflect`.
 

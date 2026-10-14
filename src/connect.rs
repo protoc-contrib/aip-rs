@@ -7,7 +7,7 @@
 //!
 //! | RPC | Inbound | Outbound |
 //! |---|---|---|
-//! | unary | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`; validate `REQUIRED` with protovalidate's rules, into one error | clear `INPUT_ONLY` |
+//! | unary | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one; validate `REQUIRED` with protovalidate's rules, into one error | clear `INPUT_ONLY` |
 //! | streaming | clear `OUTPUT_ONLY` on every message | clear `INPUT_ONLY` on every message |
 //!
 //! A stream has no standard-method shape, so nothing is filled in or validated
@@ -260,7 +260,10 @@ where
 ///    `<resource>_id` becomes a UUIDv7, so server-assigned ids sort by
 ///    creation time (AIP-133; the name is the handler's to build, see the
 ///    [module documentation](self)); an update's omitted `update_mask`
-///    becomes the mask the resource implies (AIP-134);
+///    becomes the mask the resource implies (AIP-134), and an explicit one
+///    loses the paths of its `OUTPUT_ONLY` fields, which AIP-203 has a server
+///    ignore rather than reject ([`Resource::clear_field_mask`]) -- a
+///    mask left empty by that writes nothing, and is not implied instead;
 /// 3. validates it: protovalidate's rules, and a `required` violation for each
 ///    `REQUIRED` field of a resource the method leaves unset -- every one on a
 ///    create, only those the mask names on an update (AIP-203) -- shaped as
@@ -293,6 +296,10 @@ fn imply<M: ResourceWrites + ?Sized>(request: &mut M, new_id: &mut dyn FnMut() -
         WriteMethod::Update { mask } => {
             if mask.paths.is_empty() {
                 *mask = write.resource.implied_field_mask();
+            } else {
+                write
+                    .resource
+                    .clear_field_mask(FieldBehaviorKind::OutputOnly, mask);
             }
         }
     });
@@ -472,11 +479,18 @@ pub enum WriteMethod<'a> {
 pub trait DynResource: FieldBehavior {
     /// [`Resource::implied_field_mask`].
     fn implied_field_mask(&self) -> FieldMask;
+
+    /// [`Resource::clear_field_mask`].
+    fn clear_field_mask(&self, kind: FieldBehaviorKind, mask: &mut FieldMask);
 }
 
 impl<T: Resource> DynResource for T {
     fn implied_field_mask(&self) -> FieldMask {
         Resource::implied_field_mask(self)
+    }
+
+    fn clear_field_mask(&self, kind: FieldBehaviorKind, mask: &mut FieldMask) {
+        Resource::clear_field_mask(self, kind, mask);
     }
 }
 
@@ -521,7 +535,7 @@ mod tests {
     }
 
     /// A resource with one `REQUIRED` field, `title` (3), an `OUTPUT_ONLY`
-    /// `create_time` and an `INPUT_ONLY` `secret`.
+    /// `create_time` (4) and an `INPUT_ONLY` `secret`.
     #[derive(Default)]
     struct Book {
         name: String,
@@ -551,6 +565,12 @@ mod tests {
                 && self.title.is_empty()
             {
                 paths.push(FieldPath::field("title", 3, FieldType::String));
+            }
+            if kind == FieldBehaviorKind::OutputOnly
+                && scope.contains("create_time")
+                && self.create_time.is_empty()
+            {
+                paths.push(FieldPath::field("create_time", 4, FieldType::String));
             }
             FieldBehaviorError::check(kind, paths)
         }
@@ -716,6 +736,35 @@ mod tests {
             sent.update_mask.map(|mask| mask.paths),
             Some(vec!["other".to_owned()])
         );
+    }
+
+    #[test]
+    fn an_update_ignores_the_output_only_fields_an_explicit_mask_names() {
+        let mut request = UpdateBook {
+            book: Some(Book {
+                title: "Dune".to_owned(),
+                ..Default::default()
+            }),
+            update_mask: mask(&["create_time", "title", "other"]),
+        };
+        imply(&mut request, &mut String::new);
+        assert_eq!(
+            request.update_mask.map(|mask| mask.paths),
+            Some(vec!["title".to_owned(), "other".to_owned()])
+        );
+    }
+
+    #[test]
+    fn an_update_leaves_a_mask_of_only_output_only_fields_empty_rather_than_implied() {
+        let mut request = UpdateBook {
+            book: Some(Book {
+                title: "Dune".to_owned(),
+                ..Default::default()
+            }),
+            update_mask: mask(&["create_time"]),
+        };
+        imply(&mut request, &mut String::new);
+        assert_eq!(request.update_mask.map(|mask| mask.paths), Some(Vec::new()));
     }
 
     #[test]

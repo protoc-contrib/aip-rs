@@ -6,6 +6,10 @@
 use core::fmt;
 use core::str::FromStr;
 
+use buffa_types::FieldMask;
+
+use crate::{FieldBehavior, FieldBehaviorKind, FieldScope};
+
 /// The AIP-159 wildcard, accepted in place of a resource ID to mean "across
 /// all values of this segment".
 ///
@@ -541,19 +545,21 @@ pub trait ResourceName: fmt::Display {
 ///
 /// Implemented by `protoc-gen-rust-aip` for every resource message. Its name's
 /// type, pattern, validation and formatting live on [`Self::Name`], the
-/// generated [`ResourceName`] type; this trait links a resource to it, and
-/// reads the field mask an update of it implies.
+/// generated [`ResourceName`] type; this trait links a resource to it, reads
+/// the field mask an update of it implies, and clears the paths of a kind from
+/// a mask an update sends. The `Default` it requires is the one every generated
+/// message has.
 ///
 /// ```ignore
 /// let name: ItemName = item.parse_name()?;
 /// if update_mask.paths.is_empty() {
 ///     item.clear_fields(FieldBehaviorKind::OutputOnly);
 ///     update_mask = item.implied_field_mask();
+/// } else {
+///     item.clear_field_mask(FieldBehaviorKind::OutputOnly, &mut update_mask);
 /// }
 /// ```
-///
-/// [`FieldBehavior`]: crate::FieldBehavior
-pub trait Resource: crate::FieldBehavior {
+pub trait Resource: FieldBehavior + Default {
     /// The resource's typed name, e.g. `ItemName`.
     type Name: ResourceName + FromStr<Err: core::error::Error + Send + Sync + 'static>;
 
@@ -581,7 +587,55 @@ pub trait Resource: crate::FieldBehavior {
     ///
     /// See <https://google.aip.dev/134#field-masks>.
     #[must_use]
-    fn implied_field_mask(&self) -> buffa_types::FieldMask;
+    fn implied_field_mask(&self) -> FieldMask;
+
+    /// Removes from `mask` the paths that name, or pass through, a field
+    /// annotated `kind`, keeping the rest in the order `mask` holds them. It
+    /// edits `mask` in place, as [`clear_fields`](FieldBehavior::clear_fields)
+    /// edits a message, and reads only the schema of `Self`, never the values
+    /// of `self`.
+    ///
+    /// A path is walked segment by segment, through singular message fields
+    /// and oneof members, so `carrier.tracking_id` is removed when either
+    /// `carrier` or `tracking_id` is annotated `kind`; `carrier` is kept when
+    /// only fields beneath it are. A path that names no field, such as `*`, is
+    /// kept as written: whether it applies is the mask's own validation to
+    /// decide.
+    ///
+    /// AIP-203 has a server ignore the `OUTPUT_ONLY` fields an update mask
+    /// names rather than reject the update:
+    ///
+    /// ```ignore
+    /// if let Some(mask) = request.update_mask.as_option_mut() {
+    ///     request.book.clear_field_mask(FieldBehaviorKind::OutputOnly, mask);
+    /// }
+    /// ```
+    ///
+    /// Built on [`validate_fields`](FieldBehavior::validate_fields), run on
+    /// `Self::default()`, where every field is unset: a path is removed when
+    /// it, or a path above it, names a field the check reports. Not generated.
+    ///
+    /// See <https://google.aip.dev/203#output-only>.
+    fn clear_field_mask(&self, kind: FieldBehaviorKind, mask: &mut FieldMask) {
+        let schema = Self::default();
+        mask.paths.retain(|path| !names_kind(&schema, kind, path));
+    }
+}
+
+/// Whether `path`, or a path above it, names a field of `schema` annotated
+/// `kind`. `schema` is a default message, so every field is unset, and
+/// [`FieldBehavior::validate_fields`] reports a field of `kind` exactly when
+/// the scope names it.
+fn names_kind<M: FieldBehavior>(schema: &M, kind: FieldBehaviorKind, path: &str) -> bool {
+    path.match_indices('.')
+        .map(|(end, _)| &path[..end])
+        .chain([path])
+        .any(|prefix| {
+            let scope = [prefix.to_owned()];
+            schema
+                .validate_fields(kind, FieldScope::Mask(&scope))
+                .is_err_and(|error| error.paths.iter().any(|field| field.to_string() == prefix))
+        })
 }
 
 /// Why a resource name pattern could not be compiled.
@@ -890,6 +944,7 @@ impl core::error::Error for InvalidResourceIdError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{FieldBehaviorError, FieldPath, FieldType};
 
     fn book() -> ResourcePattern {
         ResourcePattern::compile("publishers/{publisher}/books/{book}").unwrap()
@@ -1228,5 +1283,247 @@ mod tests {
         assert_eq!(name.full_name(), "//example.com/publishers/p1/books/b1");
         assert!(name.validate().is_ok());
         assert!(!name.contains_wildcard());
+    }
+
+    /// A carrier, with an unannotated `name`, left out, and an `OUTPUT_ONLY`
+    /// `tracking_id` (2).
+    #[derive(Default)]
+    struct Carrier {
+        tracking_id: String,
+    }
+
+    impl FieldBehavior for Carrier {
+        fn validate_fields(
+            &self,
+            kind: FieldBehaviorKind,
+            scope: FieldScope<'_>,
+        ) -> Result<(), FieldBehaviorError> {
+            let mut paths = Vec::new();
+            if kind == FieldBehaviorKind::OutputOnly
+                && scope.contains("tracking_id")
+                && self.tracking_id.is_empty()
+            {
+                paths.push(FieldPath::field("tracking_id", 2, FieldType::String));
+            }
+            FieldBehaviorError::check(kind, paths)
+        }
+    }
+
+    /// A shipment, with an `OUTPUT_ONLY` `create_time` (4), a `carrier` (7)
+    /// and an `IMMUTABLE` `origin_carrier` (13), checked as
+    /// protoc-gen-rust-aip generates the check: a message field the scope
+    /// names is entered when set, one it names fields beneath is entered as
+    /// held, or as its default when unset. Its unannotated scalars, `origin`
+    /// and `notes`, take no part in the check, so they are left out.
+    #[derive(Default)]
+    struct Shipment {
+        create_time: Option<u64>,
+        carrier: Option<Carrier>,
+        origin_carrier: Option<Carrier>,
+    }
+
+    impl FieldBehavior for Shipment {
+        fn validate_fields(
+            &self,
+            kind: FieldBehaviorKind,
+            scope: FieldScope<'_>,
+        ) -> Result<(), FieldBehaviorError> {
+            let mut paths = Vec::new();
+            if kind == FieldBehaviorKind::OutputOnly
+                && scope.contains("create_time")
+                && self.create_time.is_none()
+            {
+                paths.push(FieldPath::field("create_time", 4, FieldType::Message));
+            }
+            if kind == FieldBehaviorKind::Immutable
+                && scope.contains("origin_carrier")
+                && self.origin_carrier.is_none()
+            {
+                paths.push(FieldPath::field("origin_carrier", 13, FieldType::Message));
+            }
+            if kind == FieldBehaviorKind::OutputOnly {
+                for (name, number, carrier) in [
+                    ("carrier", 7, &self.carrier),
+                    ("origin_carrier", 13, &self.origin_carrier),
+                ] {
+                    let path = FieldPath::field(name, number, FieldType::Message);
+                    let checked = if scope.contains(name) {
+                        carrier
+                            .as_ref()
+                            .map(|carrier| carrier.validate_fields(kind, FieldScope::All))
+                    } else {
+                        let FieldScope::Mask(mask) = scope else {
+                            unreachable!("All contains every field")
+                        };
+                        let beneath: Vec<String> = mask
+                            .iter()
+                            .filter_map(|path| path.strip_prefix(name)?.strip_prefix('.'))
+                            .map(ToOwned::to_owned)
+                            .collect();
+                        (!beneath.is_empty()).then(|| {
+                            carrier
+                                .as_ref()
+                                .unwrap_or(&Carrier::default())
+                                .validate_fields(kind, FieldScope::Mask(&beneath))
+                        })
+                    };
+                    if let Some(Err(error)) = checked {
+                        paths.extend(error.prefixed(&path).paths);
+                    }
+                }
+            }
+            FieldBehaviorError::check(kind, paths)
+        }
+    }
+
+    fn mask(paths: &[&str]) -> FieldMask {
+        FieldMask {
+            paths: paths.iter().map(|&path| path.to_owned()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// `shipments/{shipment}`, enough of a typed name for [`Shipment`] to be a
+    /// resource.
+    struct ShipmentName(String);
+
+    impl fmt::Display for ShipmentName {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+
+    impl FromStr for ShipmentName {
+        type Err = core::convert::Infallible;
+
+        fn from_str(name: &str) -> Result<Self, Self::Err> {
+            Ok(Self(name.to_owned()))
+        }
+    }
+
+    impl ResourceName for ShipmentName {
+        fn resource_type(&self) -> &str {
+            "example.com/Shipment"
+        }
+
+        fn pattern(&self) -> &str {
+            "shipments/{shipment}"
+        }
+
+        fn validate(&self) -> Result<(), InvalidResourceIdError> {
+            Ok(())
+        }
+
+        fn contains_wildcard(&self) -> bool {
+            false
+        }
+    }
+
+    impl Resource for Shipment {
+        type Name = ShipmentName;
+
+        fn parse_name(&self) -> Result<ShipmentName, core::convert::Infallible> {
+            "shipments/s1".parse()
+        }
+
+        fn implied_field_mask(&self) -> FieldMask {
+            FieldMask::default()
+        }
+    }
+
+    fn cleared<M: Resource>(message: &M, kind: FieldBehaviorKind, paths: &[&str]) -> Vec<String> {
+        let mut mask = mask(paths);
+        message.clear_field_mask(kind, &mut mask);
+        mask.paths
+    }
+
+    #[test]
+    fn clear_field_mask_removes_the_paths_of_the_kind_keeping_the_rest_in_order() {
+        assert_eq!(
+            cleared(
+                &Shipment::default(),
+                FieldBehaviorKind::OutputOnly,
+                &["notes", "create_time", "origin"]
+            ),
+            ["notes", "origin"]
+        );
+    }
+
+    #[test]
+    fn clear_field_mask_removes_a_nested_path_through_a_message_to_the_kind() {
+        assert_eq!(
+            cleared(
+                &Shipment::default(),
+                FieldBehaviorKind::OutputOnly,
+                &["carrier.tracking_id", "carrier.name"]
+            ),
+            ["carrier.name"]
+        );
+    }
+
+    #[test]
+    fn clear_field_mask_removes_a_path_beneath_a_field_of_the_kind() {
+        assert_eq!(
+            cleared(
+                &Shipment::default(),
+                FieldBehaviorKind::Immutable,
+                &["origin_carrier.name", "notes"]
+            ),
+            ["notes"]
+        );
+    }
+
+    #[test]
+    fn clear_field_mask_keeps_a_path_that_names_no_field_and_a_star() {
+        let paths = ["*", "unknown", "carrier.unknown", "notes.length"];
+        assert_eq!(
+            cleared(&Shipment::default(), FieldBehaviorKind::OutputOnly, &paths),
+            paths
+        );
+    }
+
+    #[test]
+    fn clear_field_mask_edits_the_mask_in_place_and_leaves_the_message_alone() {
+        let shipment = Shipment {
+            create_time: Some(7),
+            ..Default::default()
+        };
+        let mut mask = mask(&["create_time", "notes"]);
+        shipment.clear_field_mask(FieldBehaviorKind::OutputOnly, &mut mask);
+        assert_eq!(mask.paths, ["notes"]);
+        assert_eq!(shipment.create_time, Some(7));
+    }
+
+    #[test]
+    fn clear_field_mask_leaves_an_empty_mask_and_a_mask_of_no_kind_alone() {
+        assert!(cleared(&Shipment::default(), FieldBehaviorKind::OutputOnly, &[]).is_empty());
+
+        assert_eq!(
+            cleared(
+                &Shipment::default(),
+                FieldBehaviorKind::Required,
+                &["create_time", "carrier.name"]
+            ),
+            ["create_time", "carrier.name"]
+        );
+    }
+
+    #[test]
+    fn clear_field_mask_reads_the_schema_not_the_values() {
+        let shipment = Shipment {
+            create_time: Some(7),
+            carrier: Some(Carrier {
+                tracking_id: "T-1".to_owned(),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            cleared(
+                &shipment,
+                FieldBehaviorKind::OutputOnly,
+                &["create_time", "carrier.tracking_id", "carrier", "notes"]
+            ),
+            ["carrier", "notes"]
+        );
     }
 }
