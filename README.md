@@ -24,9 +24,9 @@ read `google.api.field_behavior` off a descriptor pool's fields as a
 `FieldBehaviorSet`:
 
 ```toml
-aip = { package = "aip-rs", version = "0.5" }                                   # with the interceptor
-aip = { package = "aip-rs", version = "0.5", default-features = false }         # primitives only
-aip = { package = "aip-rs", version = "0.5", features = ["descriptor"] }
+aip = { package = "aip-rs", version = "0.6" }                                   # with the interceptor
+aip = { package = "aip-rs", version = "0.6", default-features = false }         # primitives only
+aip = { package = "aip-rs", version = "0.6", features = ["descriptor"] }
 ```
 
 | AIP | Concept | Where it lives | |
@@ -41,7 +41,7 @@ aip = { package = "aip-rs", version = "0.5", features = ["descriptor"] }
 | [203](https://google.aip.dev/203) | checking the fields of a behavior within a scope (`validate_fields`), e.g. `REQUIRED` — all on a create, those the mask names on an update | `FieldBehavior` trait, **generated** impls; `FieldBehaviorError`, `FieldPath` (each field with its number and `FieldType`, as protovalidate reports a violation's path) | ✅ |
 | [203](https://google.aip.dev/203) | a behavior's `google.api.FieldBehavior` number (`TryFrom<i32>`/`From<FieldBehaviorKind> for i32`, `UnknownFieldBehavior`); a set of behaviors (`FieldBehaviorSet`); a descriptor field's behaviors (`FieldDescriptorExt`, `descriptor` feature) | `field_behavior`, `descriptor` | ✅ |
 | [203](https://google.aip.dev/203) | `REQUIRED` on a request's own fields, value rules | protovalidate (`required`, `min_len`, …) | — |
-| [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [233](https://google.aip.dev/233), [235](https://google.aip.dev/235) | a standard-method request's shape — the resources a create, update or batch writes (`ResourceWrites`, `ResourceWrite`, `WriteMethod`, `DynResource`) | `connect`, **generated** impls | ✅ |
+| [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [233](https://google.aip.dev/233), [234](https://google.aip.dev/234) | a standard-method request's shape — the resources a create, update or batch writes (`ResourceWrites`, `ResourceWrite`, `WriteMethod`, `DynResource`) | `connect`, **generated** impls | ✅ |
 | [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [203](https://google.aip.dev/203) | the server's policy at the RPC boundary — clear `OUTPUT_ONLY`/`INPUT_ONLY`, fill in a create's omitted id, imply an update's mask, check `REQUIRED` per method with protovalidate's rules (`FieldBehaviorInterceptor`, `Procedure`, `prepare`) | `connect` (default feature); `PROCEDURES` **generated** | ✅ |
 | [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
 | [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158) | `order_by`, page tokens | the query layer — see below | — |
@@ -133,7 +133,7 @@ impl aip::FieldBehavior for Item {
         if kind == aip::FieldBehaviorKind::Required && scope.contains("display_name")
             && self.display_name.is_empty()
         {
-            paths.push(aip::FieldPath::field("display_name"));
+            paths.push(aip::FieldPath::field("display_name", 3, aip::FieldType::String));
         }
         aip::FieldBehaviorError::check(kind, paths)
     }
@@ -205,12 +205,12 @@ generated code reads `aip::ResourcePattern`:
 
 ```toml
 [dependencies]
-aip = { package = "aip-rs", version = "0.5" }
+aip = { package = "aip-rs", version = "0.6" }
 ```
 
 The minimum supported Rust version is 1.85, the first with edition 2024.
 
-The crate is pre-1.0: a breaking change bumps the minor version, so `0.5`
+The crate is pre-1.0: a breaking change bumps the minor version, so `0.6`
 above will not pick one up unasked.
 
 ## License

@@ -421,7 +421,7 @@ impl From<FieldType> for ViolationType {
 ///   `update_mask`;
 /// - an update (AIP-134): that resource field, and a `google.protobuf.FieldMask
 ///   update_mask` beside it -- the schema, not the value, makes it an update;
-/// - a batch (AIP-233, AIP-235): a repeated `requests` of creates or updates,
+/// - a batch (AIP-233, AIP-234): a repeated `requests` of creates or updates,
 ///   each written under `requests[i]`.
 ///
 /// Every other request writes nothing, which the default says.
