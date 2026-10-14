@@ -29,7 +29,9 @@
 //! - AIP-122 resource names -- [`ResourcePattern`], [`ResourceName`]
 //! - AIP-159 wildcards -- [`resource::WILDCARD`]
 //! - AIP-123 resources -- [`Resource`], linking a resource to its typed name
-//! - AIP-134 implied field masks -- [`Resource::implied_field_mask`]
+//! - AIP-134 field masks -- [`Resource::implied_field_mask`] for an update's
+//!   omitted mask, [`Resource::clear_field_mask`] to remove the paths of a
+//!   kind, such as `OUTPUT_ONLY`, from an explicit one
 //! - AIP-203 field behavior -- [`FieldBehavior`], which clears and validates
 //!   the fields of a [`FieldBehaviorKind`], within a [`FieldScope`], reporting
 //!   a [`FieldBehaviorError`] with a [`FieldPath`] per field
@@ -40,7 +42,8 @@
 //!   `connect` feature, [`ResourceWrites`] says which resources a request
 //!   writes, and [`FieldBehaviorInterceptor`] applies the server's policy to
 //!   them: clearing, filling in a create's omitted id, implying an update's
-//!   mask, and checking `REQUIRED` per method with protovalidate's rules
+//!   omitted mask and dropping the `OUTPUT_ONLY` paths of an explicit one, and
+//!   checking `REQUIRED` per method with protovalidate's rules
 //!
 //! # Names
 //!
