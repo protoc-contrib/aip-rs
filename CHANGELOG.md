@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/protoc-contrib/aip-rs/compare/v0.5.0...v0.6.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* Resource requires Default, and DynResource has a new required method. Generated resources are unaffected.
+
+### Features
+
+* ignore OUTPUT_ONLY paths in an update mask, with clear_field_mask ([#22](https://github.com/protoc-contrib/aip-rs/issues/22)) ([e188955](https://github.com/protoc-contrib/aip-rs/commit/e1889555479f7ab2ee37fe7741ab017714ac77e7))
+
 ## [0.5.0](https://github.com/protoc-contrib/aip-rs/compare/v0.4.0...v0.5.0) (2026-10-13)
 
 
