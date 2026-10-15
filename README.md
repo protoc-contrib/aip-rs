@@ -24,9 +24,9 @@ read `google.api.field_behavior` off a descriptor pool's fields as a
 `FieldBehaviorSet`:
 
 ```toml
-aip = { package = "aip-rs", version = "0.6" }                                   # with the interceptor
-aip = { package = "aip-rs", version = "0.6", default-features = false }         # primitives only
-aip = { package = "aip-rs", version = "0.6", features = ["descriptor"] }
+aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.8.0" }                                   # with the interceptor
+aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.8.0", default-features = false }         # primitives only
+aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.8.0", features = ["descriptor"] }
 ```
 
 | AIP | Concept | Where it lives | |
@@ -205,13 +205,19 @@ generated code reads `aip::ResourcePattern`:
 
 ```toml
 [dependencies]
-aip = { package = "aip-rs", version = "0.6" }
+aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.8.0" }
 ```
+
+Releases from 0.8.0 are git tags, not crates.io versions: the interceptor's
+`google.rpc.BadRequest` comes from [buffa-protos], which is not published, and
+crates.io takes no git dependency. 0.7.0 and earlier stay on crates.io.
+
+[buffa-protos]: https://github.com/protoc-contrib/buffa-protos
 
 The minimum supported Rust version is 1.85, the first with edition 2024.
 
-The crate is pre-1.0: a breaking change bumps the minor version, so `0.6`
-above will not pick one up unasked.
+The crate is pre-1.0: a breaking change bumps the minor version, and a tag
+pins one release, so nothing changes unasked.
 
 ## License
 
