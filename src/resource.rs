@@ -568,15 +568,14 @@ pub trait ResourceName: fmt::Display {
 /// A message that declares `google.api.resource` (AIP-123): what a resource
 /// adds to the [`FieldBehavior`] every generated message has.
 ///
-/// Implemented by `protoc-gen-rust-aip` for every resource message. Its name's
-/// type, pattern, validation and formatting live on [`Self::Name`], the
-/// generated [`ResourceName`] type; this trait links a resource to it, reads
+/// Implemented by `protoc-gen-rust-aip` for every resource message: it reads
 /// the field mask an update of it implies, and clears the paths of a kind from
 /// a mask an update sends. The `Default` it requires is the one every generated
-/// message has.
+/// message has. Its name -- the type, pattern, validation and formatting -- is
+/// the generated [`ResourceName`] type, which the resource's generated
+/// `parse_name` returns.
 ///
 /// ```ignore
-/// let name: ItemName = item.parse_name()?;
 /// if update_mask.paths.is_empty() {
 ///     item.clear_fields(FieldBehaviorKind::OutputOnly);
 ///     update_mask = item.implied_field_mask();
@@ -585,16 +584,6 @@ pub trait ResourceName: fmt::Display {
 /// }
 /// ```
 pub trait Resource: FieldBehavior + Default {
-    /// The resource's typed name, e.g. `ItemName`.
-    type Name: ResourceName + FromStr<Err: core::error::Error + Send + Sync + 'static>;
-
-    /// The `IDENTIFIER` field, `name` (AIP-122), parsed into the typed name.
-    ///
-    /// # Errors
-    ///
-    /// The typed name's parse error, when `name` does not match its pattern.
-    fn parse_name(&self) -> Result<Self::Name, <Self::Name as FromStr>::Err>;
-
     /// The field mask AIP-134 implies when an update omits one: every field an
     /// update may write — not `OUTPUT_ONLY`, `IDENTIFIER` or `IMMUTABLE` — that
     /// this value sets, in declaration order.
@@ -738,7 +727,8 @@ impl fmt::Display for CompileError {
 impl core::error::Error for CompileError {}
 
 /// Why a string does not parse as a resource name of a pattern -- what every
-/// generated `parse`, `parse_name` and `parse_<field>` returns, and
+/// generated `parse` returns, what a [`FieldError`](crate::FieldError) from
+/// `parse_name` and `parse_<field>` says is wrong, and
 /// [`ResourcePattern::scan`] underneath them.
 ///
 /// Map it to `InvalidArgument` at the RPC boundary.
@@ -1443,49 +1433,7 @@ mod tests {
         }
     }
 
-    /// `shipments/{shipment}`, enough of a typed name for [`Shipment`] to be a
-    /// resource.
-    struct ShipmentName(String);
-
-    impl fmt::Display for ShipmentName {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str(&self.0)
-        }
-    }
-
-    impl FromStr for ShipmentName {
-        type Err = core::convert::Infallible;
-
-        fn from_str(name: &str) -> Result<Self, Self::Err> {
-            Ok(Self(name.to_owned()))
-        }
-    }
-
-    impl ResourceName for ShipmentName {
-        fn resource_type(&self) -> &str {
-            "example.com/Shipment"
-        }
-
-        fn pattern(&self) -> &str {
-            "shipments/{shipment}"
-        }
-
-        fn validate(&self) -> Result<(), InvalidResourceIdError> {
-            Ok(())
-        }
-
-        fn contains_wildcard(&self) -> bool {
-            false
-        }
-    }
-
     impl Resource for Shipment {
-        type Name = ShipmentName;
-
-        fn parse_name(&self) -> Result<ShipmentName, core::convert::Infallible> {
-            "shipments/s1".parse()
-        }
-
         fn implied_field_mask(&self) -> FieldMask {
             FieldMask::default()
         }

@@ -9,13 +9,11 @@
 //! impls protoc-gen-rust-aip and protoc-gen-protovalidate-buffa would emit.
 #![cfg(feature = "connect")]
 
-use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
 use aip::{
     FieldBehavior, FieldBehaviorError, FieldBehaviorInterceptor, FieldBehaviorKind, FieldPath,
-    FieldScope, FieldType, Procedure, Resource, ResourceName, ResourceWrite, ResourceWrites,
-    WriteMethod,
+    FieldScope, FieldType, Procedure, Resource, ResourceWrite, ResourceWrites, WriteMethod,
 };
 use buffa::bytes::{Buf, Bytes};
 use buffa::encoding::{Tag, WireType, encode_varint, skip_field, varint_len};
@@ -178,41 +176,6 @@ message!(GetBookRequest {
 
 // -- What the plugins would generate ----------------------------------------
 
-/// `books/{book}`, enough of a typed name for [`Book`] to be a resource.
-struct BookName(String);
-
-impl std::fmt::Display for BookName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::str::FromStr for BookName {
-    type Err = Infallible;
-
-    fn from_str(name: &str) -> Result<Self, Self::Err> {
-        Ok(Self(name.to_owned()))
-    }
-}
-
-impl ResourceName for BookName {
-    fn resource_type(&self) -> &str {
-        "example.com/Book"
-    }
-
-    fn pattern(&self) -> &str {
-        "books/{book}"
-    }
-
-    fn validate(&self) -> Result<(), aip::resource::InvalidResourceIdError> {
-        Ok(())
-    }
-
-    fn contains_wildcard(&self) -> bool {
-        false
-    }
-}
-
 impl FieldBehavior for Book {
     fn clear_fields(&mut self, kind: FieldBehaviorKind) {
         match kind {
@@ -236,12 +199,6 @@ impl FieldBehavior for Book {
 }
 
 impl Resource for Book {
-    type Name = BookName;
-
-    fn parse_name(&self) -> Result<BookName, Infallible> {
-        self.name.parse()
-    }
-
     fn implied_field_mask(&self) -> FieldMask {
         FieldMask {
             paths: if self.title.is_empty() {
