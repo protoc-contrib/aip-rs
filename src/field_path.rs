@@ -152,10 +152,13 @@ impl fmt::Display for FieldPath {
 /// request names `name`, and a caller holding that message inside another puts
 /// it where it is with [`prefixed`](Self::prefixed).
 ///
-/// protoc-gen-rust-aip's `parse*` methods are to return it, with the field's
-/// number and type already filled in; until a generator release does, they
-/// return their [`ParseError`] bare, and this type is only available to build
-/// by hand.
+/// protoc-gen-rust-aip's generated `parse*` methods return it, with the field's
+/// number and type already filled in.
+///
+/// The failure and the path are boxed together, so a `Result` of it stays one
+/// pointer wide in its `Err`, whatever `E` is: a bare path and a
+/// [`ParseError`] next to each other would trip clippy's `result_large_err`
+/// on every function that returns one.
 ///
 /// ```
 /// use aip::{FieldError, FieldPath, FieldType};
@@ -170,6 +173,12 @@ impl fmt::Display for FieldPath {
 /// [`ParseError`]: crate::resource::ParseError
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldError<E> {
+    inner: Box<FieldErrorInner<E>>,
+}
+
+/// What a [`FieldError`] holds, behind its box.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FieldErrorInner<E> {
     path: FieldPath,
     source: E,
 }
@@ -178,14 +187,16 @@ impl<E> FieldError<E> {
     /// The failure `source` of the field at `path`.
     #[must_use]
     pub fn new(path: FieldPath, source: E) -> Self {
-        Self { path, source }
+        Self {
+            inner: Box::new(FieldErrorInner { path, source }),
+        }
     }
 
     /// The field, as a caller reports it: `name`, `item.name`,
     /// `requests[1].item.name`.
     #[must_use]
     pub fn path(&self) -> &FieldPath {
-        &self.path
+        &self.inner.path
     }
 
     /// The field, prefixed with `prefix`: how a caller holding the parsed
@@ -193,7 +204,7 @@ impl<E> FieldError<E> {
     /// `requests[1].item`.
     #[must_use]
     pub fn prefixed(mut self, prefix: &FieldPath) -> Self {
-        self.path = prefix.clone().join(core::mem::take(&mut self.path));
+        self.inner.path = prefix.clone().join(core::mem::take(&mut self.inner.path));
         self
     }
 }
@@ -201,13 +212,13 @@ impl<E> FieldError<E> {
 /// Writes `item.name: <the failure>`.
 impl<E: fmt::Display> fmt::Display for FieldError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.path, self.source)
+        write!(f, "{}: {}", self.inner.path, self.inner.source)
     }
 }
 
 impl<E: core::error::Error + 'static> core::error::Error for FieldError<E> {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        Some(&self.source)
+        Some(&self.inner.source)
     }
 }
 
@@ -286,6 +297,16 @@ mod tests {
         let error = FieldError::new(name(), Refused);
         assert_eq!(error.path(), &name());
         assert_eq!(error.to_string(), "name: refused");
+    }
+
+    #[test]
+    fn a_field_error_is_one_pointer_wide_whatever_it_wraps() {
+        // What keeps clippy's `result_large_err` quiet on every function that
+        // returns one.
+        assert_eq!(
+            core::mem::size_of::<FieldError<crate::resource::ParseError>>(),
+            core::mem::size_of::<usize>()
+        );
     }
 
     #[test]
