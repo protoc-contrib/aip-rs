@@ -65,7 +65,7 @@ use crate::{FieldBehavior, FieldBehaviorKind, FieldPath, FieldScope, FieldType, 
 /// each message it sends. Each step decodes the message from the payload as
 /// its own type and puts it back.
 ///
-/// Built with [`Procedure::new`] or [`Procedure::well_known`]; the fields are
+/// Built with [`Procedure::validate`] or [`Procedure::clear`]; the fields are
 /// public so a caller can apply exactly what the interceptor would, e.g.
 /// `(procedure.inbound)(&mut payload)`.
 #[derive(Debug, Clone, Copy)]
@@ -79,12 +79,12 @@ pub struct Procedure {
 }
 
 impl Procedure {
-    /// A procedure of any cardinality: [`prepare`] on each message received
+    /// A procedure of any cardinality: [`validate`] on each message received
     /// -- `OUTPUT_ONLY` cleared, what AIP leaves to the server filled in,
     /// `REQUIRED` and protovalidate's rules checked -- and `INPUT_ONLY`
     /// cleared on each message sent.
     #[must_use]
-    pub const fn new<Req, Resp>(path: &'static str) -> Self
+    pub const fn validate<Req, Resp>(path: &'static str) -> Self
     where
         Req: buffa::Message
             + JsonSerialize
@@ -98,7 +98,7 @@ impl Procedure {
     {
         Self {
             path,
-            inbound: prepare::<Req>,
+            inbound: validate::<Req>,
             outbound: clear_input_only::<Resp>,
         }
     }
@@ -107,10 +107,10 @@ impl Procedure {
     /// `google.protobuf.Empty`: `OUTPUT_ONLY` cleared on each message received
     /// and `INPUT_ONLY` on each message sent. Such a request writes no
     /// resource and carries no protovalidate rules, so clearing is all
-    /// [`prepare`] would do -- and protovalidate-buffa does not implement
+    /// [`validate`] would do -- and protovalidate-buffa does not implement
     /// `Validate` for it.
     #[must_use]
-    pub const fn well_known<Req, Resp>(path: &'static str) -> Self
+    pub const fn clear<Req, Resp>(path: &'static str) -> Self
     where
         Req: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
         Resp: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
@@ -204,7 +204,7 @@ fn apply(
     Ok(payload)
 }
 
-/// [`Procedure::well_known`]'s inbound step: `OUTPUT_ONLY` cleared on a
+/// [`Procedure::clear`]'s inbound step: `OUTPUT_ONLY` cleared on a
 /// payload holding an `M`.
 fn clear_output_only<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
@@ -233,7 +233,7 @@ where
 }
 
 /// What [`FieldBehaviorInterceptor`] does to each request message before its
-/// handler sees it -- [`Procedure::new`]'s inbound step -- to the `M` `payload`
+/// handler sees it -- [`Procedure::validate`]'s inbound step -- to the `M` `payload`
 /// holds, for a caller to apply exactly that, such as a handler test:
 ///
 /// 1. clears `OUTPUT_ONLY` fields, at any depth, so a client cannot write
@@ -264,7 +264,7 @@ where
 /// rule failed to compile or run.
 ///
 /// Also if `payload` does not hold an `M`.
-pub fn prepare<M>(payload: &mut Payload) -> Result<(), ConnectError>
+pub fn validate<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
     M: buffa::Message
         + JsonSerialize
@@ -278,12 +278,12 @@ where
     let mut request = payload.message::<M>()?.clone();
     request.clear_fields(FieldBehaviorKind::OutputOnly);
     imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
-    validate(&mut request).map_err(connect_error)?;
+    violations(&mut request).map_err(connect_error)?;
     payload.set_message(request);
     Ok(())
 }
 
-/// `error` as [`prepare`] answers it: protovalidate-buffa's rendering, and for
+/// `error` as [`validate`] answers it: protovalidate-buffa's rendering, and for
 /// an `InvalidArgument` the fixed message and a [`bad_request`] detail.
 fn connect_error(error: ValidationError) -> ConnectError {
     let details = bad_request(&error.violations);
@@ -322,7 +322,7 @@ fn bad_request(violations: &[Violation]) -> BadRequest {
     request
 }
 
-/// Step 2 of [`prepare`], with `new_id` minting a create's omitted id.
+/// Step 2 of [`validate`], with `new_id` minting a create's omitted id.
 fn imply<M: ResourceWrites + ?Sized>(request: &mut M, new_id: &mut dyn FnMut() -> String) {
     request.for_each_write(&mut |write| match write.method {
         WriteMethod::Create { id: Some(id) } => {
@@ -343,10 +343,10 @@ fn imply<M: ResourceWrites + ?Sized>(request: &mut M, new_id: &mut dyn FnMut() -
     });
 }
 
-/// Step 3 of [`prepare`]: protovalidate's violations, then a `required` one
+/// Step 3 of [`validate`]: protovalidate's violations, then a `required` one
 /// per path [`required_paths`] finds. A rule that failed to compile or run is
 /// returned as it is, which `into_connect_error` makes an `Internal`.
-fn validate<M>(request: &mut M) -> Result<(), ValidationError>
+fn violations<M>(request: &mut M) -> Result<(), ValidationError>
 where
     M: ResourceWrites + Validate,
 {
@@ -464,7 +464,7 @@ impl From<FieldType> for ViolationType {
 ///
 /// Every other request writes nothing, which the default says.
 ///
-/// [`prepare`] is built on it; so is a service's own policy, such as filling
+/// [`validate`] is built on it; so is a service's own policy, such as filling
 /// in ids its own way.
 pub trait ResourceWrites {
     /// Calls `f` with each resource this request writes: its own, or one per
@@ -863,10 +863,10 @@ mod tests {
             }),
             ..Default::default()
         };
-        // prepare's steps; the interceptor tests run prepare itself
+        // validate's steps; the interceptor tests run validate itself
         request.clear_fields(FieldBehaviorKind::OutputOnly);
         imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
-        let error = connect_error(validate(&mut request).expect_err("title is unset"));
+        let error = connect_error(violations(&mut request).expect_err("title is unset"));
         assert_eq!(error.code, connectrpc::ErrorCode::InvalidArgument);
         assert_eq!(
             error.message.as_deref(),
@@ -923,10 +923,10 @@ mod tests {
             }),
             ..Default::default()
         };
-        // prepare's steps; the interceptor tests run prepare itself
+        // validate's steps; the interceptor tests run validate itself
         request.clear_fields(FieldBehaviorKind::OutputOnly);
         imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
-        validate(&mut request).expect("nothing is missing");
+        violations(&mut request).expect("nothing is missing");
         let id = uuid::Uuid::parse_str(&request.book_id).expect("a UUID");
         assert_eq!(id.get_version_num(), 7);
     }

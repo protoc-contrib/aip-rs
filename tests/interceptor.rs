@@ -1,7 +1,7 @@
 //! [`FieldBehaviorInterceptor`] on the path a request takes through a
 //! connectrpc server -- HTTP in, the router, the interceptor chain, the
 //! handler, and back -- as aip-go's `interceptor_test.go` drives its own,
-//! rather than through [`aip::connect::prepare`] alone.
+//! rather than through [`aip::connect::validate`] alone.
 //!
 //! The messages are hand-written `buffa::Message`s, so the crate needs no
 //! codegen to test itself: a `Book` resource and the requests that write it,
@@ -346,12 +346,12 @@ const CLIENT: &str = "/example.v1.Books/ClientCreateBook";
 const UNLISTED: &str = "/example.v1.Books/UnlistedCreateBook";
 
 static PROCEDURES: &[Procedure] = &[
-    Procedure::new::<CreateBookRequest, Book>(CREATE),
-    Procedure::new::<BatchCreateBooksRequest, BatchCreateBooksResponse>(BATCH_CREATE),
-    Procedure::new::<GetBookRequest, Book>(GET),
-    Procedure::new::<Book, Book>(WATCH),
-    Procedure::new::<CreateBookRequest, Book>(IMPORT),
-    Procedure::new::<CreateBookRequest, Book>(CLIENT),
+    Procedure::validate::<CreateBookRequest, Book>(CREATE),
+    Procedure::validate::<BatchCreateBooksRequest, BatchCreateBooksResponse>(BATCH_CREATE),
+    Procedure::validate::<GetBookRequest, Book>(GET),
+    Procedure::validate::<Book, Book>(WATCH),
+    Procedure::validate::<CreateBookRequest, Book>(IMPORT),
+    Procedure::validate::<CreateBookRequest, Book>(CLIENT),
 ];
 
 // -- The server -------------------------------------------------------------
