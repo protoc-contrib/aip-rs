@@ -304,6 +304,8 @@ impl FieldBehavior for BatchCreateBooksResponse {
 
 impl FieldBehavior for GetBookRequest {}
 impl ResourceWrites for GetBookRequest {}
+/// A resource on its own writes nothing: streamed, it is only cleared.
+impl ResourceWrites for Book {}
 
 /// No protovalidate rules on these.
 macro_rules! valid {
@@ -316,7 +318,7 @@ macro_rules! valid {
     };
 }
 
-valid!(CreateBookRequest, BatchCreateBooksRequest);
+valid!(Book, CreateBookRequest, BatchCreateBooksRequest);
 
 /// A `GetBookRequest` whose rules fail to compile unless it names a book:
 /// how protovalidate-buffa reports a rule it cannot run.
@@ -336,17 +338,20 @@ const CREATE: &str = "/example.v1.Books/CreateBook";
 const BATCH_CREATE: &str = "/example.v1.Books/BatchCreateBooks";
 const GET: &str = "/example.v1.Books/GetBook";
 const WATCH: &str = "/example.v1.Books/WatchBooks";
+/// A stream of standard-method requests.
+const IMPORT: &str = "/example.v1.Books/ImportBooks";
 /// In the table, but served as a client would call it.
 const CLIENT: &str = "/example.v1.Books/ClientCreateBook";
 /// Served, but not in the table.
 const UNLISTED: &str = "/example.v1.Books/UnlistedCreateBook";
 
 static PROCEDURES: &[Procedure] = &[
-    Procedure::unary::<CreateBookRequest, Book>(CREATE),
-    Procedure::unary::<BatchCreateBooksRequest, BatchCreateBooksResponse>(BATCH_CREATE),
-    Procedure::unary::<GetBookRequest, Book>(GET),
-    Procedure::streaming::<Book, Book>(WATCH),
-    Procedure::unary::<CreateBookRequest, Book>(CLIENT),
+    Procedure::new::<CreateBookRequest, Book>(CREATE),
+    Procedure::new::<BatchCreateBooksRequest, BatchCreateBooksResponse>(BATCH_CREATE),
+    Procedure::new::<GetBookRequest, Book>(GET),
+    Procedure::new::<Book, Book>(WATCH),
+    Procedure::new::<CreateBookRequest, Book>(IMPORT),
+    Procedure::new::<CreateBookRequest, Book>(CLIENT),
 ];
 
 // -- The server -------------------------------------------------------------
@@ -447,6 +452,17 @@ fn service(seen: &Arc<Mutex<Seen>>) -> ConnectRpcService {
         }
     };
 
+    let import = {
+        let seen = Arc::clone(seen);
+        move |_, request: CreateBookRequest| {
+            seen.lock().unwrap().requests.push(format!("{request:?}"));
+            let books = vec![Ok(returned(request.book))];
+            let stream: connectrpc::ServiceStream<Book> =
+                Box::pin(futures_util::stream::iter(books));
+            async move { Ok(stream.into()) }
+        }
+    };
+
     let router = Router::new()
         .route("example.v1.Books", "CreateBook", handler_fn(create.clone()))
         .route("example.v1.Books", "BatchCreateBooks", handler_fn(batch))
@@ -455,6 +471,11 @@ fn service(seen: &Arc<Mutex<Seen>>) -> ConnectRpcService {
             "example.v1.Books",
             "WatchBooks",
             streaming_handler_fn(watch),
+        )
+        .route_server_stream(
+            "example.v1.Books",
+            "ImportBooks",
+            streaming_handler_fn(import),
         )
         .route(
             "example.v1.Books",
@@ -466,6 +487,7 @@ fn service(seen: &Arc<Mutex<Seen>>) -> ConnectRpcService {
         .with_spec(Spec::server(BATCH_CREATE, StreamType::Unary))
         .with_spec(Spec::server(GET, StreamType::Unary))
         .with_spec(Spec::server(WATCH, StreamType::ServerStream))
+        .with_spec(Spec::server(IMPORT, StreamType::ServerStream))
         .with_spec(Spec::client(CLIENT, StreamType::Unary))
         .with_spec(Spec::server(UNLISTED, StreamType::Unary));
 
@@ -497,8 +519,13 @@ async fn unary<Res: Message>(
 }
 
 /// Calls the server-streaming `procedure` with `request`, over the Connect
-/// protocol: each message streamed back.
-async fn server_stream(service: &ConnectRpcService, procedure: &str, request: &Book) -> Vec<Book> {
+/// protocol: each message streamed back, and the end-of-stream JSON, which
+/// carries the error a failed stream ends with.
+async fn server_stream(
+    service: &ConnectRpcService,
+    procedure: &str,
+    request: &impl Message,
+) -> (Vec<Book>, String) {
     let message = request.encode_to_vec();
     let mut body = vec![0];
     body.extend_from_slice(&u32::try_from(message.len()).unwrap().to_be_bytes());
@@ -518,15 +545,18 @@ async fn server_stream(service: &ConnectRpcService, procedure: &str, request: &B
     // Each envelope is a flags byte and a big-endian length; the end-of-stream
     // one, flagged 0x02, carries JSON rather than a message.
     let mut messages = Vec::new();
+    let mut end = String::new();
     while body.remaining() >= 5 {
         let flags = body.get_u8();
         let len = body.get_u32() as usize;
         let frame = body.split_to(len);
         if flags & 0x02 == 0 {
             messages.push(Book::decode_from_slice(&frame).expect("a streamed message"));
+        } else {
+            end = String::from_utf8_lossy(&frame).into_owned();
         }
     }
-    messages
+    (messages, end)
 }
 
 fn book(title: &str) -> Book {
@@ -608,8 +638,10 @@ async fn a_missing_required_field_is_refused_before_the_handler() {
         "the handler ran: {:?}",
         seen.requests
     );
-    let (code, _, _) = seen.error.clone().expect("an error");
+    let (code, message, _) = seen.error.clone().expect("an error");
     assert_eq!(code, ErrorCode::InvalidArgument);
+    // A fixed message, as aip-go answers: the violations are in the details.
+    assert_eq!(message, "The request contains invalid parameters");
 }
 
 #[tokio::test]
@@ -632,14 +664,14 @@ async fn a_request_that_writes_nothing_passes_through_and_its_response_is_cleare
 async fn a_stream_has_output_only_cleared_inbound_and_input_only_outbound() {
     let seen = Arc::new(Mutex::new(Seen::default()));
 
-    let responses = server_stream(&service(&seen), WATCH, &book("")).await;
+    let (responses, _) = server_stream(&service(&seen), WATCH, &book("")).await;
 
     let seen = seen.lock().unwrap();
     let [received] = &seen.requests[..] else {
         panic!("one call: {:?}", seen.requests);
     };
-    // Cleared, and nothing else: a stream has no REQUIRED check, so the
-    // empty title passes.
+    // Cleared, and nothing else: a resource streamed on its own writes
+    // nothing, so it has no REQUIRED check, and the empty title passes.
     assert!(received.contains(r#"create_time: """#), "{received}");
     assert!(
         received.contains(r#"secret: "sent by the client""#),
@@ -653,6 +685,49 @@ async fn a_stream_has_output_only_cleared_inbound_and_input_only_outbound() {
     assert!(
         responses.iter().all(|book| !book.create_time.is_empty()),
         "{responses:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_streamed_create_is_filled_in_and_validated_like_a_unary_one() {
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let request = CreateBookRequest {
+        book: Some(book("Dune")),
+        ..Default::default()
+    };
+
+    let (responses, end) = server_stream(&service(&seen), IMPORT, &request).await;
+
+    let seen = seen.lock().unwrap();
+    let [received] = &seen.requests[..] else {
+        panic!("one call: {:?}", seen.requests);
+    };
+    // OUTPUT_ONLY cleared and an id minted, as on a unary create.
+    assert!(received.contains(r#"create_time: """#), "{received}");
+    assert!(!received.contains(r#"book_id: """#), "{received}");
+    assert_eq!(responses.len(), 1, "{end}");
+    assert_eq!(responses[0].secret, "");
+}
+
+#[tokio::test]
+async fn a_streamed_create_missing_a_required_field_fails_the_stream() {
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let request = CreateBookRequest {
+        book: Some(book("")),
+        ..Default::default()
+    };
+
+    let (responses, end) = server_stream(&service(&seen), IMPORT, &request).await;
+
+    assert!(responses.is_empty(), "{responses:?}");
+    assert!(
+        seen.lock().unwrap().requests.is_empty(),
+        "the handler ran on a message that failed validation"
+    );
+    assert!(end.contains(r#""code":"invalid_argument""#), "{end}");
+    assert!(
+        end.contains(r#""message":"The request contains invalid parameters""#),
+        "{end}"
     );
 }
 

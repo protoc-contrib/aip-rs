@@ -52,10 +52,13 @@ aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", ta
 nothing to configure — the Rust counterpart of aip-go's
 `NewFieldBehaviorInterceptor`:
 
-| RPC | Inbound | Outbound |
-| --- | --- | --- |
-| unary | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one (`clear_field_mask`); validate `REQUIRED` — every field on a create, those the mask names on an update — with protovalidate's rules, into one `InvalidArgument` | clear `INPUT_ONLY` |
-| streaming | clear `OUTPUT_ONLY` on every message | clear `INPUT_ONLY` on every message |
+| Each message received | Each message sent |
+| --- | --- |
+| clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one (`clear_field_mask`); validate `REQUIRED` — every field on a create, those the mask names on an update — with protovalidate's rules, into one `InvalidArgument`, "The request contains invalid parameters", with the violations in its details | clear `INPUT_ONLY` |
+
+It acts on every message of every RPC, unary or streamed. A message that is not
+a standard-method request — a resource streamed on its own — has nothing filled
+in or checked for `REQUIRED`; only clearing and its protovalidate rules apply.
 
 ```rust
 let service = ConnectRpcService::new(router)
@@ -69,7 +72,7 @@ the messages it passes on, the outbound ones included, and leaves a client's
 calls alone. Every message buffa and protoc-gen-rust-aip generate qualifies,
 the well-known types included (aip-rs gives them empty `FieldBehavior`
 impls), so a method taking `google.protobuf.Empty` needs nothing special.
-`aip::connect::prepare` applies the unary steps to a request a caller holds, as a
+`aip::connect::prepare` applies the inbound steps to a request a caller holds, as a
 handler test does.
 
 **Names are the server's.** AIP-133 has the server build a created resource's
@@ -83,7 +86,8 @@ an id that is already set is kept.
 
 The public surface of `aip::connect` is that and no more:
 `FieldBehaviorInterceptor`, `Procedure` (`path`, `inbound`, `outbound`;
-`Procedure::unary`, `Procedure::streaming`), `ResourceWrites`, `ResourceWrite`,
+`Procedure::new`, `Procedure::clearing` for a well-known request type),
+`ResourceWrites`, `ResourceWrite`,
 `WriteMethod`, `DynResource` (every `Resource` is one) and `prepare`.
 
 ## Scope: what is deliberately not here

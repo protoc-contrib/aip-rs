@@ -5,13 +5,14 @@
 //! policy AIP-133, AIP-134 and AIP-203 describe for a server, with nothing to
 //! configure:
 //!
-//! | RPC | Inbound | Outbound |
-//! |---|---|---|
-//! | unary | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one; validate `REQUIRED` with protovalidate's rules, into one error | clear `INPUT_ONLY` |
-//! | streaming | clear `OUTPUT_ONLY` on every message | clear `INPUT_ONLY` on every message |
+//! | Each message received | Each message sent |
+//! |---|---|
+//! | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one; validate `REQUIRED` with protovalidate's rules, into one `InvalidArgument` | clear `INPUT_ONLY` |
 //!
-//! A stream has no standard-method shape, so nothing is filled in or validated
-//! by method on one.
+//! It acts on every message of every RPC, unary or streamed, as aip-go's
+//! `NewFieldBehaviorInterceptor` does. A message that is not a standard-method
+//! request -- a resource streamed on its own -- has nothing filled in or
+//! checked for `REQUIRED`; only clearing and its protovalidate rules apply.
 //!
 //! # Names are the server's
 //!
@@ -64,7 +65,7 @@ use crate::{FieldBehavior, FieldBehaviorKind, FieldPath, FieldScope, FieldType, 
 /// each message it sends. Each step decodes the message from the payload as
 /// its own type and puts it back.
 ///
-/// Built with [`Procedure::unary`] or [`Procedure::streaming`]; the fields are
+/// Built with [`Procedure::new`] or [`Procedure::clearing`]; the fields are
 /// public so a caller can apply exactly what the interceptor would, e.g.
 /// `(procedure.inbound)(&mut payload)`.
 #[derive(Debug, Clone, Copy)]
@@ -78,12 +79,12 @@ pub struct Procedure {
 }
 
 impl Procedure {
-    /// A unary procedure: [`prepare`] on the request -- `OUTPUT_ONLY`
-    /// cleared, what AIP leaves to the server filled in, `REQUIRED` and
-    /// protovalidate's rules checked -- and `INPUT_ONLY` cleared on the
-    /// response.
+    /// A procedure of any cardinality: [`prepare`] on each message received
+    /// -- `OUTPUT_ONLY` cleared, what AIP leaves to the server filled in,
+    /// `REQUIRED` and protovalidate's rules checked -- and `INPUT_ONLY`
+    /// cleared on each message sent.
     #[must_use]
-    pub const fn unary<Req, Resp>(path: &'static str) -> Self
+    pub const fn new<Req, Resp>(path: &'static str) -> Self
     where
         Req: buffa::Message
             + JsonSerialize
@@ -97,35 +98,34 @@ impl Procedure {
     {
         Self {
             path,
-            inbound: unary_inbound::<Req>,
+            inbound: prepare_inbound::<Req>,
             outbound: outbound::<Resp>,
         }
     }
 
-    /// A streaming procedure, of any cardinality: `OUTPUT_ONLY` cleared on
-    /// each message received and `INPUT_ONLY` on each message sent.
-    ///
-    /// Also a unary procedure whose request is a well-known type, such as
-    /// `google.protobuf.Empty`: it writes no resource and carries no
-    /// protovalidate rules, so clearing is all [`prepare`] would do -- and
-    /// protovalidate-buffa does not implement `Validate` for it.
+    /// A procedure whose request is a well-known type, such as
+    /// `google.protobuf.Empty`: `OUTPUT_ONLY` cleared on each message received
+    /// and `INPUT_ONLY` on each message sent. Such a request writes no
+    /// resource and carries no protovalidate rules, so clearing is all
+    /// [`prepare`] would do -- and protovalidate-buffa does not implement
+    /// `Validate` for it.
     #[must_use]
-    pub const fn streaming<Req, Resp>(path: &'static str) -> Self
+    pub const fn clearing<Req, Resp>(path: &'static str) -> Self
     where
         Req: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
         Resp: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
     {
         Self {
             path,
-            inbound: streaming_inbound::<Req>,
+            inbound: clearing_inbound::<Req>,
             outbound: outbound::<Resp>,
         }
     }
 }
 
 /// Applies AIP field behavior on a Connect server, as aip-go's
-/// `NewFieldBehaviorInterceptor` does: the full policy on unary RPCs, clearing
-/// only on streams (see the [module documentation](self)).
+/// `NewFieldBehaviorInterceptor` does: the full policy on every message of
+/// every RPC, unary or streamed (see the [module documentation](self)).
 ///
 /// It edits the messages it passes on, the outbound ones included: a handler
 /// that keeps a message it sent sees its `INPUT_ONLY` fields cleared. Calls a
@@ -204,9 +204,9 @@ fn apply(
     Ok(payload)
 }
 
-/// A unary [`Procedure`]'s inbound step: [`prepare`] on a payload holding an
+/// [`Procedure::new`]'s inbound step: [`prepare`] on a payload holding an
 /// `M`.
-fn unary_inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
+fn prepare_inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
     M: buffa::Message
         + JsonSerialize
@@ -223,9 +223,9 @@ where
     Ok(())
 }
 
-/// A streaming [`Procedure`]'s inbound step: `OUTPUT_ONLY` cleared on a
+/// [`Procedure::clearing`]'s inbound step: `OUTPUT_ONLY` cleared on a
 /// payload holding an `M`.
-fn streaming_inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
+fn clearing_inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
     M: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
 {
@@ -251,7 +251,7 @@ where
     Ok(())
 }
 
-/// What [`FieldBehaviorInterceptor`] does to a unary request before its
+/// What [`FieldBehaviorInterceptor`] does to each request message before its
 /// handler sees it, for a caller that holds the request -- a handler test,
 /// say:
 ///
@@ -274,11 +274,13 @@ where
 ///
 /// # Errors
 ///
-/// Every violation at once, as protovalidate-buffa's `into_connect_error`
-/// renders them: `InvalidArgument` with a `buf.validate.Violations` detail,
-/// and AIP-193's `google.rpc.BadRequest` beside it -- a field violation per
-/// violation, its field path and message, within the same 4 KiB; or
-/// `Internal` if a rule failed to compile or run.
+/// Every violation at once: `InvalidArgument` with the fixed message "The
+/// request contains invalid parameters", as aip-go answers, and the violations
+/// in the details -- protovalidate-buffa's `buf.validate.Violations`, and
+/// AIP-193's `google.rpc.BadRequest` beside it, a field violation per
+/// violation, its field path and message, within the same 4 KiB. The message
+/// names no field: AIP-193 keeps what varies in the details. `Internal` if a
+/// rule failed to compile or run.
 pub fn prepare<M>(request: &mut M) -> Result<(), ConnectError>
 where
     M: FieldBehavior + ResourceWrites + Validate,
@@ -287,11 +289,15 @@ where
     imply(request, &mut || uuid::Uuid::now_v7().to_string());
     validate(request).map_err(|error| {
         let details = bad_request(&error.violations);
-        let error = error.into_connect_error();
-        if error.code == ErrorCode::InvalidArgument && !details.field_violations.is_empty() {
-            error.with_detail(ErrorDetail::from_message(BadRequest::FULL_NAME, &details))
-        } else {
+        let mut error = error.into_connect_error();
+        if error.code != ErrorCode::InvalidArgument {
+            return error;
+        }
+        error.message = Some("The request contains invalid parameters".to_owned());
+        if details.field_violations.is_empty() {
             error
+        } else {
+            error.with_detail(ErrorDetail::from_message(BadRequest::FULL_NAME, &details))
         }
     })
 }
