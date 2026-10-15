@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.0](https://github.com/protoc-contrib/aip-rs/compare/v0.9.0...v0.10.0) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* Resource drops Name and parse_name, which nothing called ([#34](https://github.com/protoc-contrib/aip-rs/issues/34))
+
+### Features
+
+* FieldError, a failure and the field it was of ([#32](https://github.com/protoc-contrib/aip-rs/issues/32)) ([ba5f6a1](https://github.com/protoc-contrib/aip-rs/commit/ba5f6a1d9085b8641e6942efa33e5ac886e62402))
+
+
+### Code Refactoring
+
+* Resource drops Name and parse_name, which nothing called ([#34](https://github.com/protoc-contrib/aip-rs/issues/34)) ([038c952](https://github.com/protoc-contrib/aip-rs/commit/038c952bf8a4438c8b8b92cb074b448060918f5f))
+
 ## [0.9.0](https://github.com/protoc-contrib/aip-rs/compare/v0.8.0...v0.9.0) (2026-10-15)
 
 
