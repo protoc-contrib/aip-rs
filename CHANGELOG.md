@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.0](https://github.com/protoc-contrib/aip-rs/compare/v0.8.0...v0.9.0) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* Procedure::unary and Procedure::streaming are replaced by Procedure::new and Procedure::clearing; the validation error's message is fixed.
+
+### Features
+
+* apply field behavior to every message; answer a validation error with a fixed message ([#29](https://github.com/protoc-contrib/aip-rs/issues/29)) ([19d32fd](https://github.com/protoc-contrib/aip-rs/commit/19d32fdcb3e6bc8c92c4028a3a5fa5d33e76d167))
+
 ## [0.8.0](https://github.com/protoc-contrib/aip-rs/compare/v0.7.0...v0.8.0) (2026-10-15)
 
 
