@@ -65,7 +65,7 @@ use crate::{FieldBehavior, FieldBehaviorKind, FieldPath, FieldScope, FieldType, 
 /// each message it sends. Each step decodes the message from the payload as
 /// its own type and puts it back.
 ///
-/// Built with [`Procedure::validate`] or [`Procedure::clear`]; the fields are
+/// Built with [`Procedure::new`] or [`Procedure::clear`]; the fields are
 /// public so a caller can apply exactly what the interceptor would, e.g.
 /// `(procedure.inbound)(&mut payload)`.
 #[derive(Debug, Clone, Copy)]
@@ -84,7 +84,7 @@ impl Procedure {
     /// `REQUIRED` and protovalidate's rules checked -- and `INPUT_ONLY`
     /// cleared on each message sent.
     #[must_use]
-    pub const fn validate<Req, Resp>(path: &'static str) -> Self
+    pub const fn new<Req, Resp>(path: &'static str) -> Self
     where
         Req: buffa::Message
             + JsonSerialize
@@ -233,7 +233,7 @@ where
 }
 
 /// What [`FieldBehaviorInterceptor`] does to each request message before its
-/// handler sees it -- [`Procedure::validate`]'s inbound step -- to the `M` `payload`
+/// handler sees it -- [`Procedure::new`]'s inbound step -- to the `M` `payload`
 /// holds, for a caller to apply exactly that, such as a handler test:
 ///
 /// 1. clears `OUTPUT_ONLY` fields, at any depth, so a client cannot write

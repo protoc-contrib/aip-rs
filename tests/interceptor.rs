@@ -346,12 +346,12 @@ const CLIENT: &str = "/example.v1.Books/ClientCreateBook";
 const UNLISTED: &str = "/example.v1.Books/UnlistedCreateBook";
 
 static PROCEDURES: &[Procedure] = &[
-    Procedure::validate::<CreateBookRequest, Book>(CREATE),
-    Procedure::validate::<BatchCreateBooksRequest, BatchCreateBooksResponse>(BATCH_CREATE),
-    Procedure::validate::<GetBookRequest, Book>(GET),
-    Procedure::validate::<Book, Book>(WATCH),
-    Procedure::validate::<CreateBookRequest, Book>(IMPORT),
-    Procedure::validate::<CreateBookRequest, Book>(CLIENT),
+    Procedure::new::<CreateBookRequest, Book>(CREATE),
+    Procedure::new::<BatchCreateBooksRequest, BatchCreateBooksResponse>(BATCH_CREATE),
+    Procedure::new::<GetBookRequest, Book>(GET),
+    Procedure::new::<Book, Book>(WATCH),
+    Procedure::new::<CreateBookRequest, Book>(IMPORT),
+    Procedure::new::<CreateBookRequest, Book>(CLIENT),
 ];
 
 // -- The server -------------------------------------------------------------
