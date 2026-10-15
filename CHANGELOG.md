@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/protoc-contrib/aip-rs/compare/v0.6.0...v0.7.0) (2026-10-15)
+
+
+### Features
+
+* FieldBehaviorSet Display, a ParseError for a bad id field, and interceptor tests through a server ([#25](https://github.com/protoc-contrib/aip-rs/issues/25)) ([e10a868](https://github.com/protoc-contrib/aip-rs/commit/e10a868f1c602c3dff95abee21a9e2bab8f62614))
+
 ## [0.6.0](https://github.com/protoc-contrib/aip-rs/compare/v0.5.0...v0.6.0) (2026-10-14)
 
 
