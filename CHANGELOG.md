@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/protoc-contrib/aip-rs/compare/v0.7.0...v0.8.0) (2026-10-15)
+
+
+### Features
+
+* carry a validation error's violations as a google.rpc.BadRequest too ([#27](https://github.com/protoc-contrib/aip-rs/issues/27)) ([0536193](https://github.com/protoc-contrib/aip-rs/commit/0536193e9419292300381846b10b1034f19a78fb))
+
 ## [0.7.0](https://github.com/protoc-contrib/aip-rs/compare/v0.6.0...v0.7.0) (2026-10-15)
 
 
