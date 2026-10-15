@@ -42,7 +42,7 @@ aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", ta
 | [203](https://google.aip.dev/203) | a behavior's `google.api.FieldBehavior` number (`TryFrom<i32>`/`From<FieldBehaviorKind> for i32`, `UnknownFieldBehavior`); a set of behaviors (`FieldBehaviorSet`); a descriptor field's behaviors (`FieldDescriptorExt`, `descriptor` feature) | `field_behavior`, `descriptor` | ✅ |
 | [203](https://google.aip.dev/203) | `REQUIRED` on a request's own fields, value rules | protovalidate (`required`, `min_len`, …) | — |
 | [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [233](https://google.aip.dev/233), [234](https://google.aip.dev/234) | a standard-method request's shape — the resources a create, update or batch writes (`ResourceWrites`, `ResourceWrite`, `WriteMethod`, `DynResource`) | `connect`, **generated** impls | ✅ |
-| [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [203](https://google.aip.dev/203) | the server's policy at the RPC boundary — clear `OUTPUT_ONLY`/`INPUT_ONLY`, fill in a create's omitted id, imply an update's mask, check `REQUIRED` per method with protovalidate's rules (`FieldBehaviorInterceptor`, `Procedure`, `prepare`) | `connect` (default feature); `PROCEDURES` **generated** | ✅ |
+| [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [203](https://google.aip.dev/203) | the server's policy at the RPC boundary — clear `OUTPUT_ONLY`/`INPUT_ONLY`, fill in a create's omitted id, imply an update's mask, check `REQUIRED` per method with protovalidate's rules (`FieldBehaviorInterceptor`, `Procedure`, `validate`) | `connect` (default feature); `PROCEDURES` **generated** | ✅ |
 | [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
 | [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158) | `order_by`, page tokens | the query layer — see below | — |
 
@@ -52,10 +52,13 @@ aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", ta
 nothing to configure — the Rust counterpart of aip-go's
 `NewFieldBehaviorInterceptor`:
 
-| RPC | Inbound | Outbound |
-| --- | --- | --- |
-| unary | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one (`clear_field_mask`); validate `REQUIRED` — every field on a create, those the mask names on an update — with protovalidate's rules, into one `InvalidArgument` | clear `INPUT_ONLY` |
-| streaming | clear `OUTPUT_ONLY` on every message | clear `INPUT_ONLY` on every message |
+| Each message received | Each message sent |
+| --- | --- |
+| clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one (`clear_field_mask`); validate `REQUIRED` — every field on a create, those the mask names on an update — with protovalidate's rules, into one `InvalidArgument`, "The request contains invalid parameters", with the violations in its details | clear `INPUT_ONLY` |
+
+It acts on every message of every RPC, unary or streamed. A message that is not
+a standard-method request — a resource streamed on its own — has nothing filled
+in or checked for `REQUIRED`; only clearing and its protovalidate rules apply.
 
 ```rust
 let service = ConnectRpcService::new(router)
@@ -69,8 +72,8 @@ the messages it passes on, the outbound ones included, and leaves a client's
 calls alone. Every message buffa and protoc-gen-rust-aip generate qualifies,
 the well-known types included (aip-rs gives them empty `FieldBehavior`
 impls), so a method taking `google.protobuf.Empty` needs nothing special.
-`aip::connect::prepare` applies the unary steps to a request a caller holds, as a
-handler test does.
+`aip::connect::validate::<M>` applies the inbound steps to a payload holding an
+`M`, exactly as the interceptor does, for a caller such as a handler test.
 
 **Names are the server's.** AIP-133 has the server build a created resource's
 `name` from the request's `parent` and `<resource>_id`. The interceptor fills
@@ -83,8 +86,9 @@ an id that is already set is kept.
 
 The public surface of `aip::connect` is that and no more:
 `FieldBehaviorInterceptor`, `Procedure` (`path`, `inbound`, `outbound`;
-`Procedure::unary`, `Procedure::streaming`), `ResourceWrites`, `ResourceWrite`,
-`WriteMethod`, `DynResource` (every `Resource` is one) and `prepare`.
+`Procedure::new`, `Procedure::clear` for a well-known request type),
+`ResourceWrites`, `ResourceWrite`,
+`WriteMethod`, `DynResource` (every `Resource` is one) and `validate`.
 
 ## Scope: what is deliberately not here
 

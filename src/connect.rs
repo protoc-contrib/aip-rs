@@ -5,13 +5,14 @@
 //! policy AIP-133, AIP-134 and AIP-203 describe for a server, with nothing to
 //! configure:
 //!
-//! | RPC | Inbound | Outbound |
-//! |---|---|---|
-//! | unary | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one; validate `REQUIRED` with protovalidate's rules, into one error | clear `INPUT_ONLY` |
-//! | streaming | clear `OUTPUT_ONLY` on every message | clear `INPUT_ONLY` on every message |
+//! | Each message received | Each message sent |
+//! |---|---|
+//! | clear `OUTPUT_ONLY`; fill in a create's omitted `<resource>_id` (a UUIDv7) and an update's omitted `update_mask`, and drop the `OUTPUT_ONLY` paths of an explicit one; validate `REQUIRED` with protovalidate's rules, into one `InvalidArgument` | clear `INPUT_ONLY` |
 //!
-//! A stream has no standard-method shape, so nothing is filled in or validated
-//! by method on one.
+//! It acts on every message of every RPC, unary or streamed, as aip-go's
+//! `NewFieldBehaviorInterceptor` does. A message that is not a standard-method
+//! request -- a resource streamed on its own -- has nothing filled in or
+//! checked for `REQUIRED`; only clearing and its protovalidate rules apply.
 //!
 //! # Names are the server's
 //!
@@ -64,7 +65,7 @@ use crate::{FieldBehavior, FieldBehaviorKind, FieldPath, FieldScope, FieldType, 
 /// each message it sends. Each step decodes the message from the payload as
 /// its own type and puts it back.
 ///
-/// Built with [`Procedure::unary`] or [`Procedure::streaming`]; the fields are
+/// Built with [`Procedure::new`] or [`Procedure::clear`]; the fields are
 /// public so a caller can apply exactly what the interceptor would, e.g.
 /// `(procedure.inbound)(&mut payload)`.
 #[derive(Debug, Clone, Copy)]
@@ -78,12 +79,12 @@ pub struct Procedure {
 }
 
 impl Procedure {
-    /// A unary procedure: [`prepare`] on the request -- `OUTPUT_ONLY`
-    /// cleared, what AIP leaves to the server filled in, `REQUIRED` and
-    /// protovalidate's rules checked -- and `INPUT_ONLY` cleared on the
-    /// response.
+    /// A procedure of any cardinality: [`validate`] on each message received
+    /// -- `OUTPUT_ONLY` cleared, what AIP leaves to the server filled in,
+    /// `REQUIRED` and protovalidate's rules checked -- and `INPUT_ONLY`
+    /// cleared on each message sent.
     #[must_use]
-    pub const fn unary<Req, Resp>(path: &'static str) -> Self
+    pub const fn new<Req, Resp>(path: &'static str) -> Self
     where
         Req: buffa::Message
             + JsonSerialize
@@ -97,35 +98,34 @@ impl Procedure {
     {
         Self {
             path,
-            inbound: unary_inbound::<Req>,
-            outbound: outbound::<Resp>,
+            inbound: validate::<Req>,
+            outbound: clear_input_only::<Resp>,
         }
     }
 
-    /// A streaming procedure, of any cardinality: `OUTPUT_ONLY` cleared on
-    /// each message received and `INPUT_ONLY` on each message sent.
-    ///
-    /// Also a unary procedure whose request is a well-known type, such as
-    /// `google.protobuf.Empty`: it writes no resource and carries no
-    /// protovalidate rules, so clearing is all [`prepare`] would do -- and
-    /// protovalidate-buffa does not implement `Validate` for it.
+    /// A procedure whose request is a well-known type, such as
+    /// `google.protobuf.Empty`: `OUTPUT_ONLY` cleared on each message received
+    /// and `INPUT_ONLY` on each message sent. Such a request writes no
+    /// resource and carries no protovalidate rules, so clearing is all
+    /// [`validate`] would do -- and protovalidate-buffa does not implement
+    /// `Validate` for it.
     #[must_use]
-    pub const fn streaming<Req, Resp>(path: &'static str) -> Self
+    pub const fn clear<Req, Resp>(path: &'static str) -> Self
     where
         Req: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
         Resp: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
     {
         Self {
             path,
-            inbound: streaming_inbound::<Req>,
-            outbound: outbound::<Resp>,
+            inbound: clear_output_only::<Req>,
+            outbound: clear_input_only::<Resp>,
         }
     }
 }
 
 /// Applies AIP field behavior on a Connect server, as aip-go's
-/// `NewFieldBehaviorInterceptor` does: the full policy on unary RPCs, clearing
-/// only on streams (see the [module documentation](self)).
+/// `NewFieldBehaviorInterceptor` does: the full policy on every message of
+/// every RPC, unary or streamed (see the [module documentation](self)).
 ///
 /// It edits the messages it passes on, the outbound ones included: a handler
 /// that keeps a message it sent sees its `INPUT_ONLY` fields cleared. Calls a
@@ -204,28 +204,9 @@ fn apply(
     Ok(payload)
 }
 
-/// A unary [`Procedure`]'s inbound step: [`prepare`] on a payload holding an
-/// `M`.
-fn unary_inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
-where
-    M: buffa::Message
-        + JsonSerialize
-        + JsonDeserialize
-        + Clone
-        + FieldBehavior
-        + ResourceWrites
-        + Validate
-        + 'static,
-{
-    let mut request = payload.message::<M>()?.clone();
-    prepare(&mut request)?;
-    payload.set_message(request);
-    Ok(())
-}
-
-/// A streaming [`Procedure`]'s inbound step: `OUTPUT_ONLY` cleared on a
+/// [`Procedure::clear`]'s inbound step: `OUTPUT_ONLY` cleared on a
 /// payload holding an `M`.
-fn streaming_inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
+fn clear_output_only<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
     M: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
 {
@@ -234,7 +215,7 @@ where
 
 /// Every [`Procedure`]'s outbound step: `INPUT_ONLY` cleared on a payload
 /// holding an `M`.
-fn outbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
+fn clear_input_only<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
     M: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
 {
@@ -251,9 +232,9 @@ where
     Ok(())
 }
 
-/// What [`FieldBehaviorInterceptor`] does to a unary request before its
-/// handler sees it, for a caller that holds the request -- a handler test,
-/// say:
+/// What [`FieldBehaviorInterceptor`] does to each request message before its
+/// handler sees it -- [`Procedure::new`]'s inbound step -- to the `M` `payload`
+/// holds, for a caller to apply exactly that, such as a handler test:
 ///
 /// 1. clears `OUTPUT_ONLY` fields, at any depth, so a client cannot write
 ///    server-owned values;
@@ -274,26 +255,46 @@ where
 ///
 /// # Errors
 ///
-/// Every violation at once, as protovalidate-buffa's `into_connect_error`
-/// renders them: `InvalidArgument` with a `buf.validate.Violations` detail,
-/// and AIP-193's `google.rpc.BadRequest` beside it -- a field violation per
-/// violation, its field path and message, within the same 4 KiB; or
-/// `Internal` if a rule failed to compile or run.
-pub fn prepare<M>(request: &mut M) -> Result<(), ConnectError>
+/// Every violation at once: `InvalidArgument` with the fixed message "The
+/// request contains invalid parameters", as aip-go answers, and the violations
+/// in the details -- protovalidate-buffa's `buf.validate.Violations`, and
+/// AIP-193's `google.rpc.BadRequest` beside it, a field violation per
+/// violation, its field path and message, within the same 4 KiB. The message
+/// names no field: AIP-193 keeps what varies in the details. `Internal` if a
+/// rule failed to compile or run.
+///
+/// Also if `payload` does not hold an `M`.
+pub fn validate<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
-    M: FieldBehavior + ResourceWrites + Validate,
+    M: buffa::Message
+        + JsonSerialize
+        + JsonDeserialize
+        + Clone
+        + FieldBehavior
+        + ResourceWrites
+        + Validate
+        + 'static,
 {
+    let mut request = payload.message::<M>()?.clone();
     request.clear_fields(FieldBehaviorKind::OutputOnly);
-    imply(request, &mut || uuid::Uuid::now_v7().to_string());
-    validate(request).map_err(|error| {
-        let details = bad_request(&error.violations);
-        let error = error.into_connect_error();
-        if error.code == ErrorCode::InvalidArgument && !details.field_violations.is_empty() {
-            error.with_detail(ErrorDetail::from_message(BadRequest::FULL_NAME, &details))
-        } else {
-            error
+    imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
+    violations(&mut request).map_err(connect_error)?;
+    payload.set_message(request);
+    Ok(())
+}
+
+/// `error` as [`validate`] answers it: protovalidate-buffa's rendering, and for
+/// an `InvalidArgument` the fixed message and a [`bad_request`] detail.
+fn connect_error(error: ValidationError) -> ConnectError {
+    let details = bad_request(&error.violations);
+    let mut error = error.into_connect_error();
+    if error.code == ErrorCode::InvalidArgument {
+        error.message = Some("The request contains invalid parameters".to_owned());
+        if !details.field_violations.is_empty() {
+            error = error.with_detail(ErrorDetail::from_message(BadRequest::FULL_NAME, &details));
         }
-    })
+    }
+    error
 }
 
 /// The most a [`bad_request`] detail takes, as protovalidate-buffa allows its
@@ -321,7 +322,7 @@ fn bad_request(violations: &[Violation]) -> BadRequest {
     request
 }
 
-/// Step 2 of [`prepare`], with `new_id` minting a create's omitted id.
+/// Step 2 of [`validate`], with `new_id` minting a create's omitted id.
 fn imply<M: ResourceWrites + ?Sized>(request: &mut M, new_id: &mut dyn FnMut() -> String) {
     request.for_each_write(&mut |write| match write.method {
         WriteMethod::Create { id: Some(id) } => {
@@ -342,10 +343,10 @@ fn imply<M: ResourceWrites + ?Sized>(request: &mut M, new_id: &mut dyn FnMut() -
     });
 }
 
-/// Step 3 of [`prepare`]: protovalidate's violations, then a `required` one
+/// Step 3 of [`validate`]: protovalidate's violations, then a `required` one
 /// per path [`required_paths`] finds. A rule that failed to compile or run is
 /// returned as it is, which `into_connect_error` makes an `Internal`.
-fn validate<M>(request: &mut M) -> Result<(), ValidationError>
+fn violations<M>(request: &mut M) -> Result<(), ValidationError>
 where
     M: ResourceWrites + Validate,
 {
@@ -463,7 +464,7 @@ impl From<FieldType> for ViolationType {
 ///
 /// Every other request writes nothing, which the default says.
 ///
-/// [`prepare`] is built on it; so is a service's own policy, such as filling
+/// [`validate`] is built on it; so is a service's own policy, such as filling
 /// in ids its own way.
 pub trait ResourceWrites {
     /// Calls `f` with each resource this request writes: its own, or one per
@@ -854,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_clears_and_refuses_a_missing_required_field() {
+    fn a_create_missing_a_required_field_is_refused_with_its_violations() {
         let mut request = CreateBook {
             book: Some(Book {
                 create_time: "injected".to_owned(),
@@ -862,8 +863,15 @@ mod tests {
             }),
             ..Default::default()
         };
-        let error = prepare(&mut request).expect_err("title is unset");
+        // validate's steps; the interceptor tests run validate itself
+        request.clear_fields(FieldBehaviorKind::OutputOnly);
+        imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
+        let error = connect_error(violations(&mut request).expect_err("title is unset"));
         assert_eq!(error.code, connectrpc::ErrorCode::InvalidArgument);
+        assert_eq!(
+            error.message.as_deref(),
+            Some("The request contains invalid parameters")
+        );
         assert!(
             !error.details.is_empty(),
             "the violations travel as a detail"
@@ -907,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_passes_a_complete_create_with_a_uuid_v7_id() {
+    fn a_complete_create_passes_with_a_uuid_v7_id() {
         let mut request = CreateBook {
             book: Some(Book {
                 title: "Dune".to_owned(),
@@ -915,7 +923,10 @@ mod tests {
             }),
             ..Default::default()
         };
-        prepare(&mut request).expect("nothing is missing");
+        // validate's steps; the interceptor tests run validate itself
+        request.clear_fields(FieldBehaviorKind::OutputOnly);
+        imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
+        violations(&mut request).expect("nothing is missing");
         let id = uuid::Uuid::parse_str(&request.book_id).expect("a UUID");
         assert_eq!(id.get_version_num(), 7);
     }
