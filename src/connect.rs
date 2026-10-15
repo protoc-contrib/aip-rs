@@ -117,7 +117,7 @@ impl Procedure {
     {
         Self {
             path,
-            inbound: clearing_inbound::<Req>,
+            inbound: inbound::<Req>,
             outbound: outbound::<Resp>,
         }
     }
@@ -224,8 +224,8 @@ where
 }
 
 /// [`Procedure::clearing`]'s inbound step: `OUTPUT_ONLY` cleared on a
-/// payload holding an `M`.
-fn clearing_inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
+/// payload holding an `M`, as [`outbound`] clears `INPUT_ONLY`.
+fn inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
     M: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
 {
@@ -290,15 +290,14 @@ where
     validate(request).map_err(|error| {
         let details = bad_request(&error.violations);
         let mut error = error.into_connect_error();
-        if error.code != ErrorCode::InvalidArgument {
-            return error;
+        if error.code == ErrorCode::InvalidArgument {
+            error.message = Some("The request contains invalid parameters".to_owned());
+            if !details.field_violations.is_empty() {
+                error =
+                    error.with_detail(ErrorDetail::from_message(BadRequest::FULL_NAME, &details));
+            }
         }
-        error.message = Some("The request contains invalid parameters".to_owned());
-        if details.field_violations.is_empty() {
-            error
-        } else {
-            error.with_detail(ErrorDetail::from_message(BadRequest::FULL_NAME, &details))
-        }
+        error
     })
 }
 
