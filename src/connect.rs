@@ -98,8 +98,8 @@ impl Procedure {
     {
         Self {
             path,
-            inbound: prepare_inbound::<Req>,
-            outbound: outbound::<Resp>,
+            inbound: prepare::<Req>,
+            outbound: clear_input_only::<Resp>,
         }
     }
 
@@ -117,8 +117,8 @@ impl Procedure {
     {
         Self {
             path,
-            inbound: inbound::<Req>,
-            outbound: outbound::<Resp>,
+            inbound: clear_output_only::<Req>,
+            outbound: clear_input_only::<Resp>,
         }
     }
 }
@@ -204,28 +204,9 @@ fn apply(
     Ok(payload)
 }
 
-/// [`Procedure::new`]'s inbound step: [`prepare`] on a payload holding an
-/// `M`.
-fn prepare_inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
-where
-    M: buffa::Message
-        + JsonSerialize
-        + JsonDeserialize
-        + Clone
-        + FieldBehavior
-        + ResourceWrites
-        + Validate
-        + 'static,
-{
-    let mut request = payload.message::<M>()?.clone();
-    prepare(&mut request)?;
-    payload.set_message(request);
-    Ok(())
-}
-
 /// [`Procedure::well_known`]'s inbound step: `OUTPUT_ONLY` cleared on a
-/// payload holding an `M`, as [`outbound`] clears `INPUT_ONLY`.
-fn inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
+/// payload holding an `M`.
+fn clear_output_only<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
     M: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
 {
@@ -234,7 +215,7 @@ where
 
 /// Every [`Procedure`]'s outbound step: `INPUT_ONLY` cleared on a payload
 /// holding an `M`.
-fn outbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
+fn clear_input_only<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
     M: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
 {
@@ -252,8 +233,8 @@ where
 }
 
 /// What [`FieldBehaviorInterceptor`] does to each request message before its
-/// handler sees it, for a caller that holds the request -- a handler test,
-/// say:
+/// handler sees it -- [`Procedure::new`]'s inbound step -- to the `M` `payload`
+/// holds, for a caller to apply exactly that, such as a handler test:
 ///
 /// 1. clears `OUTPUT_ONLY` fields, at any depth, so a client cannot write
 ///    server-owned values;
@@ -281,24 +262,39 @@ where
 /// violation, its field path and message, within the same 4 KiB. The message
 /// names no field: AIP-193 keeps what varies in the details. `Internal` if a
 /// rule failed to compile or run.
-pub fn prepare<M>(request: &mut M) -> Result<(), ConnectError>
+///
+/// Also if `payload` does not hold an `M`.
+pub fn prepare<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
-    M: FieldBehavior + ResourceWrites + Validate,
+    M: buffa::Message
+        + JsonSerialize
+        + JsonDeserialize
+        + Clone
+        + FieldBehavior
+        + ResourceWrites
+        + Validate
+        + 'static,
 {
+    let mut request = payload.message::<M>()?.clone();
     request.clear_fields(FieldBehaviorKind::OutputOnly);
-    imply(request, &mut || uuid::Uuid::now_v7().to_string());
-    validate(request).map_err(|error| {
-        let details = bad_request(&error.violations);
-        let mut error = error.into_connect_error();
-        if error.code == ErrorCode::InvalidArgument {
-            error.message = Some("The request contains invalid parameters".to_owned());
-            if !details.field_violations.is_empty() {
-                error =
-                    error.with_detail(ErrorDetail::from_message(BadRequest::FULL_NAME, &details));
-            }
+    imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
+    validate(&mut request).map_err(connect_error)?;
+    payload.set_message(request);
+    Ok(())
+}
+
+/// `error` as [`prepare`] answers it: protovalidate-buffa's rendering, and for
+/// an `InvalidArgument` the fixed message and a [`bad_request`] detail.
+fn connect_error(error: ValidationError) -> ConnectError {
+    let details = bad_request(&error.violations);
+    let mut error = error.into_connect_error();
+    if error.code == ErrorCode::InvalidArgument {
+        error.message = Some("The request contains invalid parameters".to_owned());
+        if !details.field_violations.is_empty() {
+            error = error.with_detail(ErrorDetail::from_message(BadRequest::FULL_NAME, &details));
         }
-        error
-    })
+    }
+    error
 }
 
 /// The most a [`bad_request`] detail takes, as protovalidate-buffa allows its
@@ -859,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_clears_and_refuses_a_missing_required_field() {
+    fn a_create_missing_a_required_field_is_refused_with_its_violations() {
         let mut request = CreateBook {
             book: Some(Book {
                 create_time: "injected".to_owned(),
@@ -867,8 +863,15 @@ mod tests {
             }),
             ..Default::default()
         };
-        let error = prepare(&mut request).expect_err("title is unset");
+        // prepare's steps; the interceptor tests run prepare itself
+        request.clear_fields(FieldBehaviorKind::OutputOnly);
+        imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
+        let error = connect_error(validate(&mut request).expect_err("title is unset"));
         assert_eq!(error.code, connectrpc::ErrorCode::InvalidArgument);
+        assert_eq!(
+            error.message.as_deref(),
+            Some("The request contains invalid parameters")
+        );
         assert!(
             !error.details.is_empty(),
             "the violations travel as a detail"
@@ -912,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_passes_a_complete_create_with_a_uuid_v7_id() {
+    fn a_complete_create_passes_with_a_uuid_v7_id() {
         let mut request = CreateBook {
             book: Some(Book {
                 title: "Dune".to_owned(),
@@ -920,7 +923,10 @@ mod tests {
             }),
             ..Default::default()
         };
-        prepare(&mut request).expect("nothing is missing");
+        // prepare's steps; the interceptor tests run prepare itself
+        request.clear_fields(FieldBehaviorKind::OutputOnly);
+        imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
+        validate(&mut request).expect("nothing is missing");
         let id = uuid::Uuid::parse_str(&request.book_id).expect("a UUID");
         assert_eq!(id.get_version_num(), 7);
     }
