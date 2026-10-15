@@ -32,7 +32,7 @@ aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", ta
 | AIP | Concept | Where it lives | |
 | --- | --- | --- | --- |
 | [122](https://google.aip.dev/122) | resource names | `resource` (pattern scan/format) + generated types (`ResourceName`) | ✅ |
-| [123](https://google.aip.dev/123) | a resource and its typed name (`Resource::Name`, `parse_name`) | `Resource` trait, **generated** impls | ✅ |
+| [123](https://google.aip.dev/123) | a resource and its typed name (the generated `parse_name`) | **generated** impls | ✅ |
 | [159](https://google.aip.dev/159) | wildcard segments | `resource` | ✅ |
 | [134](https://google.aip.dev/134) | the field mask an omitted `update_mask` implies (`implied_field_mask`) | `Resource` trait, **generated** impls | ✅ |
 | [203](https://google.aip.dev/203#output-only) | `OUTPUT_ONLY` paths in an explicit `update_mask`, ignored (`clear_field_mask`: removes the paths that name, or pass through, a field of a behavior) | `Resource` trait, built on the generated `validate_fields` | ✅ |
@@ -144,8 +144,6 @@ impl aip::FieldBehavior for Item {
 }
 
 impl aip::Resource for Item {
-    type Name = ItemName;
-    fn parse_name(&self) -> Result<ItemName, aip::resource::ParseError> { self.name.parse() }
     fn implied_field_mask(&self) -> buffa_types::FieldMask { /* the writable fields set */ }
 }
 ```

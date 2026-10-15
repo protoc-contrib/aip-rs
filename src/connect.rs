@@ -528,42 +528,7 @@ impl<T: Resource> DynResource for T {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FieldBehaviorError, ResourceName};
-
-    /// `books/{book}`, enough of a typed name for [`Book`] to be a resource.
-    struct BookName(String);
-
-    impl core::fmt::Display for BookName {
-        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-            f.write_str(&self.0)
-        }
-    }
-
-    impl core::str::FromStr for BookName {
-        type Err = core::convert::Infallible;
-
-        fn from_str(name: &str) -> Result<Self, Self::Err> {
-            Ok(Self(name.to_owned()))
-        }
-    }
-
-    impl ResourceName for BookName {
-        fn resource_type(&self) -> &str {
-            "example.com/Book"
-        }
-
-        fn pattern(&self) -> &str {
-            "books/{book}"
-        }
-
-        fn validate(&self) -> Result<(), crate::resource::InvalidResourceIdError> {
-            Ok(())
-        }
-
-        fn contains_wildcard(&self) -> bool {
-            false
-        }
-    }
+    use crate::FieldBehaviorError;
 
     /// A resource with one `REQUIRED` field, `title` (3), an `OUTPUT_ONLY`
     /// `create_time` (4) and an `INPUT_ONLY` `secret`.
@@ -608,12 +573,6 @@ mod tests {
     }
 
     impl Resource for Book {
-        type Name = BookName;
-
-        fn parse_name(&self) -> Result<BookName, core::convert::Infallible> {
-            self.name.parse()
-        }
-
         fn implied_field_mask(&self) -> FieldMask {
             let mut paths = Vec::new();
             if !self.title.is_empty() {
