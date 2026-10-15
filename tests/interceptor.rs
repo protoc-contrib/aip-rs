@@ -593,6 +593,17 @@ async fn a_create_is_cleared_and_filled_in_on_the_way_in_and_cleared_on_the_way_
         "{received}"
     );
     assert!(!received.contains(r#"book_id: """#), "{received}");
+    // The id is a UUIDv7, so server-assigned ids sort by creation time.
+    let id = received
+        .split(r#"book_id: ""#)
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("an id");
+    assert_eq!(
+        uuid::Uuid::parse_str(id).expect("a UUID").get_version_num(),
+        7,
+        "{received}"
+    );
     // INPUT_ONLY cleared on the response; OUTPUT_ONLY is the server's to set.
     assert_eq!(response.secret, "");
     assert_eq!(response.create_time, "2026-01-01T00:00:00Z");
@@ -729,6 +740,8 @@ async fn a_streamed_create_missing_a_required_field_fails_the_stream() {
         end.contains(r#""message":"The request contains invalid parameters""#),
         "{end}"
     );
+    // The violations travel as a google.rpc.BadRequest too (AIP-193).
+    assert!(end.contains(r#""type":"google.rpc.BadRequest""#), "{end}");
 }
 
 #[tokio::test]

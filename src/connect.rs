@@ -278,7 +278,24 @@ where
     let mut request = payload.message::<M>()?.clone();
     request.clear_fields(FieldBehaviorKind::OutputOnly);
     imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
-    violations(&mut request).map_err(connect_error)?;
+
+    // Step 3: protovalidate's violations, then a `required` one per path
+    // `required_paths` finds. A rule that failed to compile or run is answered
+    // as it is, which `into_connect_error` makes an `Internal`.
+    let mut error = match request.validate() {
+        Ok(()) => ValidationError::default(),
+        Err(error) if error.compile_error.is_some() || error.runtime_error.is_some() => {
+            return Err(connect_error(error));
+        }
+        Err(error) => error,
+    };
+    error
+        .violations
+        .extend(required_paths(&mut request).iter().map(required_violation));
+    if !error.violations.is_empty() {
+        return Err(connect_error(error));
+    }
+
     payload.set_message(request);
     Ok(())
 }
@@ -341,30 +358,6 @@ fn imply<M: ResourceWrites + ?Sized>(request: &mut M, new_id: &mut dyn FnMut() -
             }
         }
     });
-}
-
-/// Step 3 of [`validate`]: protovalidate's violations, then a `required` one
-/// per path [`required_paths`] finds. A rule that failed to compile or run is
-/// returned as it is, which `into_connect_error` makes an `Internal`.
-fn violations<M>(request: &mut M) -> Result<(), ValidationError>
-where
-    M: ResourceWrites + Validate,
-{
-    let mut error = match request.validate() {
-        Ok(()) => ValidationError::default(),
-        Err(error) if error.compile_error.is_some() || error.runtime_error.is_some() => {
-            return Err(error);
-        }
-        Err(error) => error,
-    };
-    error
-        .violations
-        .extend(required_paths(request).iter().map(required_violation));
-    if error.violations.is_empty() {
-        Ok(())
-    } else {
-        Err(error)
-    }
 }
 
 /// The `REQUIRED` fields the method leaves unset, on each resource `request`
@@ -855,39 +848,6 @@ mod tests {
     }
 
     #[test]
-    fn a_create_missing_a_required_field_is_refused_with_its_violations() {
-        let mut request = CreateBook {
-            book: Some(Book {
-                create_time: "injected".to_owned(),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        // validate's steps; the interceptor tests run validate itself
-        request.clear_fields(FieldBehaviorKind::OutputOnly);
-        imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
-        let error = connect_error(violations(&mut request).expect_err("title is unset"));
-        assert_eq!(error.code, connectrpc::ErrorCode::InvalidArgument);
-        assert_eq!(
-            error.message.as_deref(),
-            Some("The request contains invalid parameters")
-        );
-        assert!(
-            !error.details.is_empty(),
-            "the violations travel as a detail"
-        );
-        assert!(
-            error
-                .details
-                .iter()
-                .any(|detail| detail.type_url == BadRequest::FULL_NAME),
-            "and as a google.rpc.BadRequest: {:?}",
-            error.details
-        );
-        assert_eq!(request.book.expect("the book stays").create_time, "");
-    }
-
-    #[test]
     fn a_bad_request_names_each_violation_s_field_and_message() {
         let title = FieldPath::index("requests", 1, FieldType::Message, 2)
             .join(book_path())
@@ -912,23 +872,6 @@ mod tests {
         assert!(!request.field_violations.is_empty());
         assert!(request.field_violations.len() < violations.len());
         assert!(request.encoded_len() as usize <= MAX_DETAIL_BYTES);
-    }
-
-    #[test]
-    fn a_complete_create_passes_with_a_uuid_v7_id() {
-        let mut request = CreateBook {
-            book: Some(Book {
-                title: "Dune".to_owned(),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        // validate's steps; the interceptor tests run validate itself
-        request.clear_fields(FieldBehaviorKind::OutputOnly);
-        imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
-        violations(&mut request).expect("nothing is missing");
-        let id = uuid::Uuid::parse_str(&request.book_id).expect("a UUID");
-        assert_eq!(id.get_version_num(), 7);
     }
 
     #[test]
