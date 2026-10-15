@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/protoc-contrib/aip-rs/compare/v0.10.0...v0.10.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* box a FieldError's payload, so a Result of it stays small ([#35](https://github.com/protoc-contrib/aip-rs/issues/35)) ([6eac286](https://github.com/protoc-contrib/aip-rs/commit/6eac286badd9c1e7d7ac8ccb2b8e693b65824af6))
+
 ## [0.10.0](https://github.com/protoc-contrib/aip-rs/compare/v0.9.0...v0.10.0) (2026-10-15)
 
 
