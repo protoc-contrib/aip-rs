@@ -410,6 +410,31 @@ impl ResourcePattern {
             },
         }
     }
+
+    /// Builds the error for a request field holding a bare id of this
+    /// pattern's resource -- a create's `<resource>_id` (AIP-133) -- whose
+    /// value is not one. It names the field rather than a segment, since the
+    /// field is what the caller sent: `parse book_id "abc": <reason>`, as
+    /// aip-go's generated `Parse<Resource>ID` reports it.
+    ///
+    /// ```
+    /// use aip::ResourcePattern;
+    ///
+    /// let pattern: ResourcePattern = "books/{book}".parse()?;
+    /// let error = pattern.invalid_id("book_id", "abc", "invalid length");
+    /// assert_eq!(error.to_string(), r#"parse book_id "abc": invalid length"#);
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn invalid_id(&self, field: &str, id: &str, reason: impl fmt::Display) -> ParseError {
+        ParseError {
+            pattern: self.pattern.clone(),
+            name: id.to_owned(),
+            kind: ParseErrorKind::InvalidId {
+                field: field.to_owned(),
+                reason: reason.to_string(),
+            },
+        }
+    }
 }
 
 impl FromStr for ResourcePattern {
@@ -731,7 +756,8 @@ impl ParseError {
         &self.pattern
     }
 
-    /// Returns the name that failed to parse.
+    /// Returns the name that failed to parse, or for
+    /// [`ParseErrorKind::InvalidId`] the id.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -791,10 +817,26 @@ pub enum ParseErrorKind {
         /// What the conversion said was wrong with it.
         reason: String,
     },
+    /// A request field holding a bare id, not a name -- a create's
+    /// `<resource>_id` -- whose value is not one. [`ParseError::name`] is the
+    /// id.
+    ///
+    /// Raised by the caller through
+    /// [`invalid_id`](ResourcePattern::invalid_id).
+    InvalidId {
+        /// The request field, e.g. `book_id`.
+        field: String,
+        /// What was wrong with the id.
+        reason: String,
+    },
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // A bare id is not a name, so it is not parsed against the pattern.
+        if let ParseErrorKind::InvalidId { field, reason } = &self.kind {
+            return write!(f, "parse {field} {:?}: {reason}", self.name);
+        }
         write!(
             f,
             "invalid resource name: parse {:?} against {:?}: ",
@@ -816,6 +858,7 @@ impl fmt::Display for ParseError {
             ParseErrorKind::InvalidValue { name, reason } => {
                 write!(f, "invalid value for segment ({name}): {reason}")
             }
+            ParseErrorKind::InvalidId { .. } => unreachable!("written above"),
         }
     }
 }
@@ -1176,6 +1219,23 @@ mod tests {
         assert_eq!(
             error.to_string(),
             r#"invalid resource name: parse "publishers/p1/books/not-a-uuid" against "publishers/{publisher}/books/{book}": invalid value for segment (book): invalid length: expected 36, found 10"#
+        );
+    }
+
+    #[test]
+    fn reports_an_id_field_by_its_name() {
+        let error = book().invalid_id("book_id", "abc", "invalid length: expected 36, found 3");
+        assert_eq!(
+            error.kind(),
+            &ParseErrorKind::InvalidId {
+                field: "book_id".to_owned(),
+                reason: "invalid length: expected 36, found 3".to_owned(),
+            }
+        );
+        assert_eq!(error.name(), "abc");
+        assert_eq!(
+            error.to_string(),
+            r#"parse book_id "abc": invalid length: expected 36, found 3"#
         );
     }
 
