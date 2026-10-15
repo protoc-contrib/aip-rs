@@ -27,6 +27,11 @@ buffa-types = "0.9"
 # fields, for code that works from descriptors rather than generated types.
 # Behind `connect` too, for the messages the interceptor decodes.
 buffa = { version = "0.9.2", optional = true }
+# Behind `connect`: google.rpc.BadRequest, the AIP-193 detail a validation
+# error carries beside buf.validate.Violations. From git, at the revision
+# grpc-rust-template pins, until a published crate carries google.rpc -- which
+# is also why aip-rs is not published to crates.io meanwhile.
+buffa-protos = { git = "https://github.com/protoc-contrib/buffa-protos", rev = "aa63d0ecee9aec07007a8a82a11df83f28f4ff6b", optional = true }
 buffa-descriptor = { version = "0.9.2", optional = true }
 # Behind `connect`: the FieldBehaviorInterceptor. connectrpc without its default
 # features, so its JSON bounds are the consumer's to switch on -- empty bounds
@@ -45,6 +50,7 @@ default = ["connect"]
 # protovalidate-buffa and uuid for a consumer that does not serve Connect.
 connect = [
     "dep:buffa",
+    "dep:buffa-protos",
     "dep:connectrpc",
     "dep:futures-util",
     "dep:protovalidate-buffa",

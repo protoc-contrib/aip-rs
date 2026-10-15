@@ -43,11 +43,13 @@
 //! `default-features = false` to use the crate without connectrpc,
 //! protovalidate-buffa and uuid.
 
+use buffa::{Message as _, MessageName as _};
+use buffa_protos::google::rpc::{BadRequest, bad_request::FieldViolation};
 use buffa_types::FieldMask;
 use connectrpc::interceptor::{StreamRequest, StreamResponse, UnaryRequest, UnaryResponse};
 use connectrpc::{
-    ConnectError, Interceptor, JsonDeserialize, JsonSerialize, Next, NextStream, Payload,
-    PayloadStream, RequestContext, SpecOrigin,
+    ConnectError, ErrorCode, ErrorDetail, Interceptor, JsonDeserialize, JsonSerialize, Next,
+    NextStream, Payload, PayloadStream, RequestContext, SpecOrigin,
 };
 use futures_util::StreamExt as _;
 use protovalidate_buffa::{
@@ -273,7 +275,9 @@ where
 /// # Errors
 ///
 /// Every violation at once, as protovalidate-buffa's `into_connect_error`
-/// renders them: `InvalidArgument` with a `buf.validate.Violations` detail; or
+/// renders them: `InvalidArgument` with a `buf.validate.Violations` detail,
+/// and AIP-193's `google.rpc.BadRequest` beside it -- a field violation per
+/// violation, its field path and message, within the same 4 KiB; or
 /// `Internal` if a rule failed to compile or run.
 pub fn prepare<M>(request: &mut M) -> Result<(), ConnectError>
 where
@@ -281,7 +285,40 @@ where
 {
     request.clear_fields(FieldBehaviorKind::OutputOnly);
     imply(request, &mut || uuid::Uuid::now_v7().to_string());
-    validate(request).map_err(ValidationError::into_connect_error)
+    validate(request).map_err(|error| {
+        let details = bad_request(&error.violations);
+        let error = error.into_connect_error();
+        if error.code == ErrorCode::InvalidArgument && !details.field_violations.is_empty() {
+            error.with_detail(ErrorDetail::from_message(BadRequest::FULL_NAME, &details))
+        } else {
+            error
+        }
+    })
+}
+
+/// The most a [`bad_request`] detail takes, as protovalidate-buffa allows its
+/// own `buf.validate.Violations`: a request with a great many violations is not
+/// answered with an error as large.
+const MAX_DETAIL_BYTES: usize = 4096;
+
+/// `violations` as AIP-193's `google.rpc.BadRequest`, the standard detail for
+/// the fields a request got wrong: a field violation per violation, its field
+/// path and message, until the next would take the detail past
+/// [`MAX_DETAIL_BYTES`].
+fn bad_request(violations: &[Violation]) -> BadRequest {
+    let mut request = BadRequest::default();
+    for violation in violations {
+        request.field_violations.push(FieldViolation {
+            field: violation.field.to_string(),
+            description: violation.message.to_string(),
+            ..Default::default()
+        });
+        if request.encoded_len() as usize > MAX_DETAIL_BYTES {
+            request.field_violations.pop();
+            break;
+        }
+    }
+    request
 }
 
 /// Step 2 of [`prepare`], with `new_id` minting a create's omitted id.
@@ -831,7 +868,42 @@ mod tests {
             !error.details.is_empty(),
             "the violations travel as a detail"
         );
+        assert!(
+            error
+                .details
+                .iter()
+                .any(|detail| detail.type_url == BadRequest::FULL_NAME),
+            "and as a google.rpc.BadRequest: {:?}",
+            error.details
+        );
         assert_eq!(request.book.expect("the book stays").create_time, "");
+    }
+
+    #[test]
+    fn a_bad_request_names_each_violation_s_field_and_message() {
+        let title = FieldPath::index("requests", 1, FieldType::Message, 2)
+            .join(book_path())
+            .join(FieldPath::field("title", 3, FieldType::String));
+        let request = bad_request(&[required_violation(&title)]);
+        let violations: Vec<_> = request
+            .field_violations
+            .iter()
+            .map(|violation| (violation.field.as_str(), violation.description.as_str()))
+            .collect();
+        assert_eq!(
+            violations,
+            [("requests[2].book.title", "value is required")]
+        );
+    }
+
+    #[test]
+    fn a_bad_request_stops_short_of_the_detail_budget() {
+        let title = FieldPath::field("title", 3, FieldType::String);
+        let violations = vec![required_violation(&title); 1000];
+        let request = bad_request(&violations);
+        assert!(!request.field_violations.is_empty());
+        assert!(request.field_violations.len() < violations.len());
+        assert!(request.encoded_len() as usize <= MAX_DETAIL_BYTES);
     }
 
     #[test]
