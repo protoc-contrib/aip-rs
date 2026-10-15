@@ -65,7 +65,7 @@ use crate::{FieldBehavior, FieldBehaviorKind, FieldPath, FieldScope, FieldType, 
 /// each message it sends. Each step decodes the message from the payload as
 /// its own type and puts it back.
 ///
-/// Built with [`Procedure::new`] or [`Procedure::clearing`]; the fields are
+/// Built with [`Procedure::new`] or [`Procedure::well_known`]; the fields are
 /// public so a caller can apply exactly what the interceptor would, e.g.
 /// `(procedure.inbound)(&mut payload)`.
 #[derive(Debug, Clone, Copy)]
@@ -110,7 +110,7 @@ impl Procedure {
     /// [`prepare`] would do -- and protovalidate-buffa does not implement
     /// `Validate` for it.
     #[must_use]
-    pub const fn clearing<Req, Resp>(path: &'static str) -> Self
+    pub const fn well_known<Req, Resp>(path: &'static str) -> Self
     where
         Req: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
         Resp: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
@@ -223,7 +223,7 @@ where
     Ok(())
 }
 
-/// [`Procedure::clearing`]'s inbound step: `OUTPUT_ONLY` cleared on a
+/// [`Procedure::well_known`]'s inbound step: `OUTPUT_ONLY` cleared on a
 /// payload holding an `M`, as [`outbound`] clears `INPUT_ONLY`.
 fn inbound<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where

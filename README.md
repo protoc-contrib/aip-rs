@@ -86,7 +86,7 @@ an id that is already set is kept.
 
 The public surface of `aip::connect` is that and no more:
 `FieldBehaviorInterceptor`, `Procedure` (`path`, `inbound`, `outbound`;
-`Procedure::new`, `Procedure::clearing` for a well-known request type),
+`Procedure::new`, `Procedure::well_known` for a well-known request type),
 `ResourceWrites`, `ResourceWrite`,
 `WriteMethod`, `DynResource` (every `Resource` is one) and `prepare`.
 
