@@ -5,9 +5,10 @@
 //! also declares the traits generated code implements -- [`ResourceName`] for
 //! a typed name, [`FieldBehavior`] for every message and [`Resource`] for a
 //! resource -- and the [`FieldBehaviorKind`], [`FieldScope`], [`FieldPath`]
-//! (each field with its number and [`FieldType`]) and [`FieldBehaviorError`]
-//! they work with. Anything that needs to walk a protobuf message is generated
-//! instead (see the scope note in the README). Behind the default `connect`
+//! (each field with its number and [`FieldType`]), [`FieldError`] (a failure
+//! and the field it was of) and [`FieldBehaviorError`] they work with.
+//! Anything that needs to walk a protobuf message is generated instead (see
+//! the scope note in the README). Behind the default `connect`
 //! feature, [`FieldBehaviorInterceptor`] applies them at a Connect server's
 //! boundary; without it the crate's one dependency is `buffa-types`, for the
 //! `FieldMask` a resource implies. The optional `descriptor` feature adds
@@ -74,7 +75,7 @@ pub use field_behavior::{
     FieldBehavior, FieldBehaviorError, FieldBehaviorKind, FieldBehaviorSet, FieldScope,
     UnknownFieldBehavior,
 };
-pub use field_path::{FieldPath, FieldType, Step};
+pub use field_path::{FieldError, FieldPath, FieldType, Step};
 pub use resource::{Resource, ResourceName, ResourcePattern};
 
 // Not implemented here, deliberately:

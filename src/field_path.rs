@@ -1,6 +1,6 @@
 //! A path from a message to one of the fields beneath it.
 //!
-//! See [`FieldPath`].
+//! See [`FieldPath`], and [`FieldError`] for what reports one.
 
 use core::fmt;
 
@@ -140,9 +140,80 @@ impl fmt::Display for FieldPath {
     }
 }
 
+/// Why the value of a request field is invalid, and which field it was: what
+/// a generated `parse` method on a request or a resource returns, so a caller
+/// can name the field in an `InvalidArgument` -- AIP-193's
+/// `google.rpc.BadRequest` -- without typing it again at the call site.
+///
+/// `E` is the failure itself, e.g. [`ParseError`]. `Display` is
+/// `name: <the failure>`, and [`source`](std::error::Error::source) is the
+/// failure, so a chain that logs sources shows both. The path is the field's
+/// own, from the message that was parsed: the generated `parse_name` on a
+/// request names `name`, and a caller holding that message inside another puts
+/// it where it is with [`prefixed`](Self::prefixed).
+///
+/// protoc-gen-rust-aip's `parse*` methods are to return it, with the field's
+/// number and type already filled in; until a generator release does, they
+/// return their [`ParseError`] bare, and this type is only available to build
+/// by hand.
+///
+/// ```
+/// use aip::{FieldError, FieldPath, FieldType};
+///
+/// let error = FieldError::new(FieldPath::field("name", 1, FieldType::String), "no such segment")
+///     .prefixed(&FieldPath::field("item", 2, FieldType::Message));
+///
+/// assert_eq!(error.path().to_string(), "item.name");
+/// assert_eq!(error.to_string(), "item.name: no such segment");
+/// ```
+///
+/// [`ParseError`]: crate::resource::ParseError
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldError<E> {
+    path: FieldPath,
+    source: E,
+}
+
+impl<E> FieldError<E> {
+    /// The failure `source` of the field at `path`.
+    #[must_use]
+    pub fn new(path: FieldPath, source: E) -> Self {
+        Self { path, source }
+    }
+
+    /// The field, as a caller reports it: `name`, `item.name`,
+    /// `requests[1].item.name`.
+    #[must_use]
+    pub fn path(&self) -> &FieldPath {
+        &self.path
+    }
+
+    /// The field, prefixed with `prefix`: how a caller holding the parsed
+    /// message inside another reports it, e.g. under `item` or
+    /// `requests[1].item`.
+    #[must_use]
+    pub fn prefixed(mut self, prefix: &FieldPath) -> Self {
+        self.path = prefix.clone().join(core::mem::take(&mut self.path));
+        self
+    }
+}
+
+/// Writes `item.name: <the failure>`.
+impl<E: fmt::Display> fmt::Display for FieldError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.path, self.source)
+    }
+}
+
+impl<E: core::error::Error + 'static> core::error::Error for FieldError<E> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{FieldPath, FieldType, Step};
+    use super::{FieldError, FieldPath, FieldType, Step};
 
     fn item() -> FieldPath {
         FieldPath::field("item", 1, FieldType::Message)
@@ -193,6 +264,55 @@ mod tests {
     fn joining_the_empty_path_changes_nothing() {
         assert_eq!(item().join(FieldPath::default()), item());
         assert!(FieldPath::default().is_empty());
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Refused;
+
+    impl core::fmt::Display for Refused {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("refused")
+        }
+    }
+
+    impl core::error::Error for Refused {}
+
+    fn name() -> FieldPath {
+        FieldPath::field("name", 1, FieldType::String)
+    }
+
+    #[test]
+    fn a_field_error_names_its_field_and_says_why() {
+        let error = FieldError::new(name(), Refused);
+        assert_eq!(error.path(), &name());
+        assert_eq!(error.to_string(), "name: refused");
+    }
+
+    #[test]
+    fn a_field_error_has_its_failure_as_its_source() {
+        use core::error::Error as _;
+
+        let error = FieldError::new(name(), Refused);
+        assert_eq!(
+            error.source().map(ToString::to_string).as_deref(),
+            Some("refused")
+        );
+    }
+
+    #[test]
+    fn a_field_error_is_prefixed_with_where_the_message_sits() {
+        let error = FieldError::new(name(), Refused)
+            .prefixed(&FieldPath::index("requests", 1, FieldType::Message, 2))
+            .prefixed(&FieldPath::field("batch", 3, FieldType::Message));
+        assert_eq!(error.path().to_string(), "batch.requests[2].name");
+        assert_eq!(error.to_string(), "batch.requests[2].name: refused");
+    }
+
+    #[test]
+    fn a_field_error_clones_and_compares() {
+        let error = FieldError::new(name(), Refused);
+        assert_eq!(error.clone(), error);
+        assert_ne!(error, FieldError::new(item(), Refused));
     }
 
     #[test]
