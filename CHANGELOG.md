@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/protoc-contrib/aip-rs/compare/v0.10.1...v0.11.0) (2026-10-19)
+
+
+### Features
+
+* build a FieldPath from a field's name, checked against the message ([#39](https://github.com/protoc-contrib/aip-rs/issues/39)) ([964b9f7](https://github.com/protoc-contrib/aip-rs/commit/964b9f70d7615bc46c2c4b2ca0c92bd1a5b7e6e3))
+
 ## [0.10.1](https://github.com/protoc-contrib/aip-rs/compare/v0.10.0...v0.10.1) (2026-10-15)
 
 
