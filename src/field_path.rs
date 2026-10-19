@@ -123,6 +123,69 @@ impl FieldPath {
     pub fn is_empty(&self) -> bool {
         self.steps.is_empty()
     }
+
+    /// The path to the field `name` of the message `M`: a field name, or field
+    /// names joined by `.` through singular message fields, as
+    /// `collection.display_name`. How a caller names a request field it wrote
+    /// out -- `update_mask`, `collection` -- without copying its number and type
+    /// out of the proto, and with the name checked against the message.
+    ///
+    /// ```
+    /// use aip::{FieldPath, FieldType, Fields};
+    ///
+    /// struct Item;
+    /// impl Fields for Item {
+    ///     fn field_path(name: &str) -> Option<FieldPath> {
+    ///         match name {
+    ///             "display_name" => Some(FieldPath::field("display_name", 2, FieldType::String)),
+    ///             _ => None,
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// assert_eq!(FieldPath::of::<Item>("display_name").to_string(), "display_name");
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// If `name` is not a field of `M`, or walks through a field that holds no
+    /// message: a name written in a handler is checked the first time it runs,
+    /// not shipped to a client as a field that does not exist, as aip-go's
+    /// `FieldPath` does.
+    #[must_use]
+    pub fn of<M: Fields>(name: &str) -> Self {
+        M::field_path(name).unwrap_or_else(|| {
+            panic!(
+                "`{name}` is not a field of `{}`, or walks through one that holds no message",
+                core::any::type_name::<M>()
+            )
+        })
+    }
+
+    /// This path, the field `rest` beneath the message `M` it holds, or this
+    /// path itself when `rest` is `None`. What a [`Fields`] implementation calls
+    /// for a field that holds a message.
+    #[must_use]
+    pub fn beneath<M: Fields>(self, rest: Option<&str>) -> Option<Self> {
+        match rest {
+            None => Some(self),
+            Some(rest) => M::field_path(rest).map(|path| self.join(path)),
+        }
+    }
+}
+
+/// A message whose fields generated code describes, so a field can be named by
+/// its name and the name checked: [`FieldPath::of`].
+///
+/// protoc-gen-rust-aip implements it for the messages it generates for, with
+/// each field's number and type filled in from the schema. A field that holds a
+/// message resolves the rest of a dotted name beneath it with
+/// [`FieldPath::beneath`]; a name that is not a field, or walks through a field
+/// that holds no message, is `None`.
+pub trait Fields {
+    /// The path to the field `name` of this message, as [`FieldPath::of`]
+    /// takes it, or `None` if it is not one.
+    fn field_path(name: &str) -> Option<FieldPath>;
 }
 
 /// Writes the path as `requests[1].item.display_name`: field names joined by
@@ -224,7 +287,7 @@ impl<E: core::error::Error + 'static> core::error::Error for FieldError<E> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FieldError, FieldPath, FieldType, Step};
+    use super::{FieldError, FieldPath, FieldType, Fields, Step};
 
     fn item() -> FieldPath {
         FieldPath::field("item", 1, FieldType::Message)
@@ -275,6 +338,82 @@ mod tests {
     fn joining_the_empty_path_changes_nothing() {
         assert_eq!(item().join(FieldPath::default()), item());
         assert!(FieldPath::default().is_empty());
+    }
+
+    struct Item;
+
+    impl Fields for Item {
+        fn field_path(name: &str) -> Option<FieldPath> {
+            match name {
+                "display_name" => Some(FieldPath::field("display_name", 2, FieldType::String)),
+                _ => None,
+            }
+        }
+    }
+
+    struct Request;
+
+    impl Fields for Request {
+        fn field_path(name: &str) -> Option<FieldPath> {
+            let (head, rest) = match name.split_once('.') {
+                Some((head, rest)) => (head, Some(rest)),
+                None => (name, None),
+            };
+            match head {
+                "item" => FieldPath::field("item", 1, FieldType::Message).beneath::<Item>(rest),
+                "update_mask" if rest.is_none() => {
+                    Some(FieldPath::field("update_mask", 3, FieldType::Message))
+                }
+                _ => None,
+            }
+        }
+    }
+
+    #[test]
+    fn of_names_a_field_by_its_name() {
+        assert_eq!(
+            FieldPath::of::<Request>("update_mask"),
+            FieldPath::field("update_mask", 3, FieldType::Message)
+        );
+    }
+
+    #[test]
+    fn of_walks_through_a_message_field() {
+        let path = FieldPath::of::<Request>("item.display_name");
+        assert_eq!(path.to_string(), "item.display_name");
+        assert_eq!(
+            path.steps().collect::<Vec<_>>(),
+            [
+                Step::Field {
+                    name: "item",
+                    number: 1,
+                    ty: FieldType::Message
+                },
+                Step::Field {
+                    name: "display_name",
+                    number: 2,
+                    ty: FieldType::String
+                }
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "`nope` is not a field of")]
+    fn of_panics_for_a_name_that_is_not_a_field() {
+        let _ = FieldPath::of::<Request>("nope");
+    }
+
+    #[test]
+    #[should_panic(expected = "`update_mask.paths` is not a field of")]
+    fn of_panics_for_a_name_through_a_field_that_holds_no_message() {
+        let _ = FieldPath::of::<Request>("update_mask.paths");
+    }
+
+    #[test]
+    #[should_panic(expected = "`item.nope` is not a field of")]
+    fn of_panics_for_a_name_that_is_not_a_field_beneath_a_message_field() {
+        let _ = FieldPath::of::<Request>("item.nope");
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
