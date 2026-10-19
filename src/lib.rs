@@ -75,7 +75,7 @@ pub use field_behavior::{
     FieldBehavior, FieldBehaviorError, FieldBehaviorKind, FieldBehaviorSet, FieldScope,
     UnknownFieldBehavior,
 };
-pub use field_path::{FieldError, FieldPath, FieldType, Step};
+pub use field_path::{FieldError, FieldPath, FieldResolver, FieldType, Step};
 pub use resource::{Resource, ResourceName, ResourcePattern};
 
 // Not implemented here, deliberately:
