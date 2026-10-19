@@ -131,10 +131,10 @@ impl FieldPath {
     /// out of the proto, and with the name checked against the message.
     ///
     /// ```
-    /// use aip::{FieldPath, FieldType, FieldPaths};
+    /// use aip::{FieldPath, FieldType, FieldResolver};
     ///
     /// struct Item;
-    /// impl FieldPaths for Item {
+    /// impl FieldResolver for Item {
     ///     fn field_path(name: &str) -> Option<FieldPath> {
     ///         match name {
     ///             "display_name" => Some(FieldPath::field("display_name", 2, FieldType::String)),
@@ -153,7 +153,7 @@ impl FieldPath {
     /// not shipped to a client as a field that does not exist, as aip-go's
     /// `FieldPath` does.
     #[must_use]
-    pub fn of<M: FieldPaths>(name: &str) -> Self {
+    pub fn of<M: FieldResolver>(name: &str) -> Self {
         M::field_path(name).unwrap_or_else(|| {
             panic!(
                 "`{name}` is not a field of `{}`, or walks through one that holds no message",
@@ -163,15 +163,15 @@ impl FieldPath {
     }
 }
 
-/// A message whose fields' paths generated code describes, so a field can be named by
-/// its name and the name checked: [`FieldPath::of`].
+/// A message that resolves the name of one of its fields to its [`FieldPath`], so
+/// a field can be named by its name and the name checked: [`FieldPath::of`].
 ///
 /// protoc-gen-rust-aip implements it for the messages it generates for, with
 /// each field's number and type filled in from the schema. A field that holds a
 /// message resolves the rest of a dotted name through that message's own
 /// implementation and [`join`](FieldPath::join)s the two; a name that is not a
 /// field, or walks through a field that holds no message, is `None`.
-pub trait FieldPaths {
+pub trait FieldResolver {
     /// The path to the field `name` of this message, as [`FieldPath::of`]
     /// takes it, or `None` if it is not one.
     fn field_path(name: &str) -> Option<FieldPath>;
@@ -276,7 +276,7 @@ impl<E: core::error::Error + 'static> core::error::Error for FieldError<E> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FieldError, FieldPath, FieldPaths, FieldType, Step};
+    use super::{FieldError, FieldPath, FieldResolver, FieldType, Step};
 
     fn item() -> FieldPath {
         FieldPath::field("item", 1, FieldType::Message)
@@ -331,7 +331,7 @@ mod tests {
 
     struct Item;
 
-    impl FieldPaths for Item {
+    impl FieldResolver for Item {
         fn field_path(name: &str) -> Option<FieldPath> {
             match name {
                 "display_name" => Some(FieldPath::field("display_name", 2, FieldType::String)),
@@ -342,7 +342,7 @@ mod tests {
 
     struct Request;
 
-    impl FieldPaths for Request {
+    impl FieldResolver for Request {
         fn field_path(name: &str) -> Option<FieldPath> {
             let (head, rest) = match name.split_once('.') {
                 Some((head, rest)) => (head, Some(rest)),
