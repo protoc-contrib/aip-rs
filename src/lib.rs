@@ -38,7 +38,7 @@
 //!   a [`FieldBehaviorError`] with a [`FieldPath`] per field
 //! - AIP-193 errors -- with the `connect` feature, the [`error`] module builds
 //!   the details an error carries, the `google.rpc.Status` of a failed batch
-//!   entry, and [`ErrorInterceptor`](error::ErrorInterceptor), which logs a
+//!   entry, and [`ErrorInterceptor`](error_interceptor::ErrorInterceptor), which logs a
 //!   failed call and answers it without its `DebugInfo`
 //! - [`FieldBehaviorSet`] -- a set of kinds, e.g. what one field is annotated
 //!   with; with the `descriptor` feature, `FieldDescriptorExt::field_behaviors`
@@ -67,7 +67,10 @@ pub mod connect;
 pub mod descriptor;
 #[cfg(feature = "connect")]
 pub mod error;
+#[cfg(feature = "connect")]
+pub mod error_interceptor;
 pub mod field_behavior;
+pub mod field_error;
 pub mod field_path;
 #[cfg(feature = "connect")]
 pub mod prepare;
@@ -83,7 +86,8 @@ pub use field_behavior::{
     FieldBehavior, FieldBehaviorError, FieldBehaviorKind, FieldBehaviorSet, FieldScope,
     UnknownFieldBehavior,
 };
-pub use field_path::{FieldError, FieldPath, FieldResolver, FieldType, Step};
+pub use field_error::FieldError;
+pub use field_path::{FieldPath, FieldResolver, FieldType, Step};
 #[cfg(feature = "connect")]
 pub use prepare::{
     PrepareError, PrepareFailure, PrepareInterceptor, Preparer, Reject, RequestPreparer,

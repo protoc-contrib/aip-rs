@@ -1,17 +1,15 @@
 //! [`FieldBehaviorInterceptor`] on the path a request takes through a
 //! connectrpc server -- HTTP in, the router, the interceptor chain, the
 //! handler, and back -- as aip-go's `interceptor_test.go` drives its own,
-//! rather than through [`aip::connect::validate`] alone.
+//! rather than through [`crate::connect::validate`] alone.
 //!
 //! The messages are hand-written `buffa::Message`s, so the crate needs no
 //! codegen to test itself: a `Book` resource and the requests that write it,
 //! each with the `FieldBehavior`, `Resource`, `ResourceWrites` and `Validate`
 //! impls protoc-gen-rust-aip and protoc-gen-protovalidate-buffa would emit.
-#![cfg(feature = "connect")]
-
 use std::sync::{Arc, Mutex};
 
-use aip::{
+use crate::{
     FieldBehavior, FieldBehaviorError, FieldBehaviorInterceptor, FieldBehaviorKind, FieldPath,
     FieldScope, FieldType, Procedure, Resource, ResourceWrite, ResourceWrites, WriteMethod,
 };

@@ -136,7 +136,7 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 | `NameRequestError` | none | the generated `parse_name` and `parse_parent` name the field, and an id typed as a `Uuid` cannot be the wildcard |
 | `NewStatus`, `NewEntryStatus` | `error::entry_status` | for a `ConnectError`: Rust has no other error to convert, and nothing here wants a status without an entry |
 | `ErrorLogLevel` | `error::log_level` | |
-| `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |
+| `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error_interceptor::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |
 | `WithErrorLogger` | none | the logs are `tracing` events |
 | the interceptor's `Send` over a batch response | `error::entry_status` and `log_level`, called where the entry's status is built | an interceptor has no reflection to find the entries in, so the caller logs them |
 | `FieldError`, `NewFieldError`, `FieldPath` | `FieldError<E>`, `FieldError::of::<M>`, `FieldPath::of::<M>` | `Err` is `failure()`, `Field()` is the path's `Display` |

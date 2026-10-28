@@ -1,9 +1,9 @@
-//! AIP-193 errors on a Connect server: the details an error carries, the
-//! `google.rpc.Status` of a failed batch entry, and the [`ErrorInterceptor`]
-//! that logs a failed call once and answers the client without what is only
-//! for the log.
+//! AIP-193 errors on a Connect server: the details an error carries, and the
+//! `google.rpc.Status` of a failed batch entry. What logs a failed call, and
+//! answers the client without what is only for the log, is the
+//! [`ErrorInterceptor`](crate::error_interceptor::ErrorInterceptor).
 //!
-//! The Rust counterpart of aip-go's `errors.go` and `error_interceptor.go`.
+//! The Rust counterpart of aip-go's `errors.go`.
 //! Nothing here knows a service: the domain of an `ErrorInfo`, the reasons and
 //! the public messages are the service's, and it builds its errors from these
 //! parts.
@@ -23,7 +23,7 @@
 //! # What the client sees
 //!
 //! A handler builds an error with every detail it knows, `DebugInfo` included,
-//! and returns it. [`ErrorInterceptor`] is where that is told from what a
+//! and returns it. The [`ErrorInterceptor`](crate::error_interceptor::ErrorInterceptor) is where that is told from what a
 //! client may have: it logs the error with its cause and where it happened,
 //! then answers without the `DebugInfo` -- AIP-193 keeps debugging information
 //! out of a response -- and with the request's id as a `RequestInfo`, which a
@@ -33,7 +33,7 @@
 //! as aip-go's interceptor does, so whatever builds one logs it, as
 //! [`log_level`] says it should be.
 
-use std::{backtrace::Backtrace, sync::Arc, time::Duration};
+use std::{backtrace::Backtrace, time::Duration};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use buffa::{Message as _, MessageName};
@@ -42,10 +42,7 @@ use buffa_protos::google::rpc::{
     bad_request::FieldViolation,
 };
 use buffa_types::google::protobuf::Any;
-use connectrpc::interceptor::{UnaryRequest, UnaryResponse};
-use connectrpc::{
-    ConnectError, ErrorCode, ErrorDetail, Interceptor, Next, RequestContext, SpecOrigin,
-};
+use connectrpc::{ConnectError, ErrorCode, ErrorDetail};
 
 use crate::{FieldError, ResourceName};
 
@@ -119,7 +116,7 @@ pub fn bad_request<E>(error: &FieldError<E>) -> ErrorDetail {
 /// The `google.rpc.RequestInfo` detail of an error that answers the request
 /// with the id `request_id`: the id the logs carry, for a client to quote.
 #[must_use]
-fn request_info(request_id: &str) -> ErrorDetail {
+pub(crate) fn request_info(request_id: &str) -> ErrorDetail {
     ErrorDetail::from_message(
         RequestInfo::FULL_NAME,
         &RequestInfo {
@@ -133,7 +130,7 @@ fn request_info(request_id: &str) -> ErrorDetail {
 /// and the stack where the detail was built.
 ///
 /// AIP-193 keeps debugging information out of what a client sees:
-/// [`ErrorInterceptor`] logs it and answers without it, and
+/// [`ErrorInterceptor`](crate::error_interceptor::ErrorInterceptor) logs it and answers without it, and
 /// [`entry_status`] leaves it out of a failed batch entry.
 #[must_use]
 pub fn debug_info(cause: &dyn std::error::Error) -> ErrorDetail {
@@ -156,7 +153,7 @@ pub fn debug_info(cause: &dyn std::error::Error) -> ErrorDetail {
 /// `error.detail::<ErrorInfo>()`.
 pub trait ConnectErrorExt {
     /// The `M` detail the error carries, if it carries one: how a client reads
-    /// [`error_info`] and the others back, and how [`ErrorInterceptor`] reads the
+    /// [`error_info`] and the others back, and how [`ErrorInterceptor`](crate::error_interceptor::ErrorInterceptor) reads the
     /// [`debug_info`] it logs.
     ///
     /// The first of that type, since AIP-193 sends each at most once. A detail
@@ -251,328 +248,5 @@ fn build_status(
     }
 }
 
-/// What failed underneath `error`, which the client never sees, and where: the
-/// stack of the `DebugInfo` a handler attached.
-fn causes(error: &ConnectError) -> (String, String) {
-    let source = std::error::Error::source(error)
-        .map(ToString::to_string)
-        .unwrap_or_default();
-    let stack = error
-        .detail::<DebugInfo>()
-        .map(|info| info.stack_entries.join("\n"))
-        .unwrap_or_default();
-    (source, stack)
-}
-
-/// What [`ErrorInterceptor`] needs from the request to find its id.
-type RequestId = Arc<dyn Fn(&RequestContext) -> Option<String> + Send + Sync>;
-
-/// Logs every RPC that fails, once, with its cause, and answers it without what
-/// is only for the log.
-///
-/// A handler builds its error rather than logging it. A [`ConnectError`]
-/// carries its cause as a source, which is kept out of the response body, and
-/// this is where it is written down: beside the procedure and which side of the
-/// call it was, into whatever span is current, so a server that opens one per
-/// request ties each line to its request.
-///
-/// At the level [`log_level`] gives its code: ERROR for a
-/// fault the request did not cause, WARN for a caller's mistake. The error's
-/// public message goes in as `reason`, its source, what actually failed, as
-/// `source`, and where as `stack`: the stack of its `google.rpc.DebugInfo`.
-///
-/// The client then gets the error less that `DebugInfo` (AIP-193) and with
-/// two details added where they are wanted:
-///
-/// - [`with_default_error_info`](Self::with_default_error_info): an
-///   `ErrorInfo` for an error that has none, its code as the reason, which is
-///   how the errors no handler built -- a request the validation refused, a
-///   body that does not decode -- carry one too;
-/// - [`with_request_id`](Self::with_request_id): the id of the request as a
-///   `RequestInfo`, which a client that does not see the response headers can
-///   still quote.
-///
-/// Both are off until asked for. Register it first among the interceptors,
-/// with `ConnectRpcService::with_interceptor`, so what the others refuse is
-/// logged and answered the same way. Unary calls only: a streamed call is not
-/// touched, and a call a client makes passes through logged as the client's.
-#[derive(Clone, Default)]
-pub struct ErrorInterceptor {
-    domain: Option<Arc<str>>,
-    request_id: Option<RequestId>,
-}
-
-impl std::fmt::Debug for ErrorInterceptor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ErrorInterceptor")
-            .field("domain", &self.domain)
-            .field("request_id", &self.request_id.is_some())
-            .finish()
-    }
-}
-
-impl ErrorInterceptor {
-    /// An interceptor that logs, and strips the `DebugInfo`, and adds nothing.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Give an error that has no `ErrorInfo` one in `domain`, with its code as
-    /// the reason: see [`with_default_error_info`](Self::with_default_error_info).
-    #[must_use]
-    pub fn with_default_error_info(mut self, domain: impl Into<Arc<str>>) -> Self {
-        self.domain = Some(domain.into());
-        self
-    }
-
-    /// Send the client the id of the request, which `request_id` finds, as a
-    /// `RequestInfo`. A request it finds none for gets none.
-    #[must_use]
-    pub fn with_request_id(
-        mut self,
-        request_id: impl Fn(&RequestContext) -> Option<String> + Send + Sync + 'static,
-    ) -> Self {
-        self.request_id = Some(Arc::new(request_id));
-        self
-    }
-}
-
-#[connectrpc::async_trait]
-impl Interceptor for ErrorInterceptor {
-    async fn intercept_unary(
-        &self,
-        request: UnaryRequest,
-        next: Next<'_>,
-    ) -> Result<UnaryResponse, ConnectError> {
-        // Read before the request moves into the call.
-        let procedure = request.ctx.spec().map_or("", |spec| spec.procedure);
-        let origin = origin(&request.ctx);
-        let request_id = self
-            .request_id
-            .as_ref()
-            .and_then(|request_id| request_id(&request.ctx));
-
-        let mut error = match next.run(request).await {
-            Ok(response) => return Ok(response),
-            Err(error) => error,
-        };
-
-        // `message` is the one field name tracing reserves for the event's
-        // own text, so the error's goes in as `reason`.
-        let reason = error.message.as_deref().unwrap_or_default();
-        let (source, stack) = causes(&error);
-        if log_level(error.code) == tracing::Level::ERROR {
-            tracing::error!(procedure, origin, code = ?error.code, reason, source, stack, "rpc failed");
-        } else {
-            tracing::warn!(procedure, origin, code = ?error.code, reason, source, stack, "rpc failed");
-        }
-
-        // The DebugInfo is for the log, not the client (AIP-193).
-        error
-            .details
-            .retain(|detail| detail.type_url != DebugInfo::FULL_NAME);
-        if let Some(domain) = &self.domain
-            && !error
-                .details
-                .iter()
-                .any(|detail| detail.type_url == ErrorInfo::FULL_NAME)
-        {
-            // Its code as the reason -- `INVALID_ARGUMENT`, `NOT_FOUND` --
-            // first among its details.
-            let reason = error.code.as_str().to_ascii_uppercase();
-            error.details.insert(0, error_info(domain, &reason));
-        }
-        if let Some(request_id) = request_id {
-            error.details.push(request_info(&request_id));
-        }
-        Err(error)
-    }
-}
-
-/// Which side of the call `ctx` is: "server" or "client". `SpecOrigin` is
-/// exhaustive -- a call is served or made -- and unset only for a request built
-/// by hand, outside any dispatcher.
-fn origin(ctx: &RequestContext) -> &'static str {
-    match ctx.spec().map(|spec| spec.origin) {
-        Some(SpecOrigin::Server) => "server",
-        Some(SpecOrigin::Client) => "client",
-        None => "",
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Shelf;
-
-    impl std::fmt::Display for Shelf {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("shelves/s1")
-        }
-    }
-
-    impl ResourceName for Shelf {
-        fn resource_type(&self) -> &str {
-            "example.com/Shelf"
-        }
-
-        fn pattern(&self) -> &str {
-            "shelves/{shelf}"
-        }
-
-        fn validate(&self) -> Result<(), crate::resource::InvalidResourceIdError> {
-            Ok(())
-        }
-
-        fn contains_wildcard(&self) -> bool {
-            false
-        }
-    }
-
-    #[test]
-    fn error_info_carries_the_reason_in_its_domain() {
-        let error =
-            ConnectError::not_found("x").with_detail(error_info("example.com", "SHELF_NOT_FOUND"));
-
-        let info = error.detail::<ErrorInfo>().expect("an ErrorInfo");
-        assert_eq!(info.reason, "SHELF_NOT_FOUND");
-        assert_eq!(info.domain, "example.com");
-    }
-
-    #[test]
-    fn resource_info_names_the_type_and_the_name() {
-        let error = ConnectError::not_found("x").with_detail(resource_info(&Shelf));
-
-        let info = error.detail::<ResourceInfo>().expect("a ResourceInfo");
-        assert_eq!(info.resource_type, "example.com/Shelf");
-        assert_eq!(info.resource_name, "shelves/s1");
-    }
-
-    #[test]
-    fn retry_info_carries_the_delay() {
-        let error =
-            ConnectError::unavailable("x").with_detail(retry_info(Duration::from_millis(1500)));
-
-        let delay = error
-            .detail::<RetryInfo>()
-            .and_then(|info| info.retry_delay.as_option().cloned())
-            .expect("a delay");
-        assert_eq!((delay.seconds, delay.nanos), (1, 500_000_000));
-    }
-
-    #[test]
-    fn bad_request_names_the_field_with_a_fixed_description() {
-        use crate::{FieldPath, FieldType};
-
-        let secret = FieldError::new(
-            FieldPath::field("name", 1, FieldType::String),
-            "shelves/s1 is taken",
-        );
-        let error = ConnectError::invalid_argument("x").with_detail(bad_request(&secret));
-
-        let request = error.detail::<BadRequest>().expect("a BadRequest");
-        let [violation] = request.field_violations.as_slice() else {
-            panic!("one violation: {request:?}");
-        };
-        assert_eq!(violation.field, "name");
-        assert_eq!(violation.description, "value is invalid");
-    }
-
-    #[test]
-    fn debug_info_has_the_cause_and_where() {
-        let cause = std::io::Error::other("connection reset");
-        let error = ConnectError::internal("x").with_detail(debug_info(&cause));
-
-        let info = error.detail::<DebugInfo>().expect("a DebugInfo");
-        assert_eq!(info.detail, "connection reset");
-        assert!(!info.stack_entries.is_empty());
-    }
-
-    #[test]
-    fn a_server_fault_logs_as_an_error_and_a_caller_s_mistake_as_a_warning() {
-        for error in [
-            ConnectError::internal("x"),
-            ConnectError::new(ErrorCode::Unknown, "x"),
-            ConnectError::new(ErrorCode::DataLoss, "x"),
-            ConnectError::unavailable("x"),
-        ] {
-            assert_eq!(
-                log_level(error.code),
-                tracing::Level::ERROR,
-                "{:?}",
-                error.code
-            );
-        }
-        for error in [
-            ConnectError::invalid_argument("x"),
-            ConnectError::not_found("x"),
-            ConnectError::already_exists("x"),
-            ConnectError::failed_precondition("x"),
-            ConnectError::aborted("x"),
-        ] {
-            assert_eq!(
-                log_level(error.code),
-                tracing::Level::WARN,
-                "{:?}",
-                error.code
-            );
-        }
-    }
-
-    #[test]
-    fn a_status_carries_the_code_the_message_and_every_detail_but_the_debug_info() {
-        let cause = std::io::Error::other("connection reset");
-        let status = entry_status(
-            &ConnectError::not_found("The requested shelf was not found")
-                .with_detail(error_info("example.com", "SHELF_NOT_FOUND"))
-                .with_detail(resource_info(&Shelf))
-                .with_detail(debug_info(&cause)),
-            0,
-        );
-
-        assert_eq!(status.code, 5);
-        assert_eq!(status.message, "The requested shelf was not found");
-        let types: Vec<&str> = status
-            .details
-            .iter()
-            .map(|detail| detail.type_url.as_str())
-            .collect();
-        assert_eq!(
-            types,
-            [
-                "type.googleapis.com/google.rpc.ErrorInfo",
-                "type.googleapis.com/google.rpc.ResourceInfo"
-            ]
-        );
-        let info = ErrorInfo::decode_from_slice(&status.details[0].value).expect("an ErrorInfo");
-        assert_eq!(info.reason, "SHELF_NOT_FOUND");
-    }
-
-    #[test]
-    fn an_entry_status_names_the_field_under_the_entry() {
-        use crate::{FieldPath, FieldType};
-
-        let field = FieldError::new(
-            FieldPath::field("name", 1, FieldType::String),
-            "no such shelf",
-        );
-        let status = entry_status(
-            &ConnectError::invalid_argument("The request contains invalid parameters")
-                .with_detail(error_info("example.com", "INVALID_NAME"))
-                .with_detail(bad_request(&field)),
-            2,
-        );
-
-        let request = status
-            .details
-            .iter()
-            .find(|detail| detail.type_url.ends_with("google.rpc.BadRequest"))
-            .map(|detail| BadRequest::decode_from_slice(&detail.value).expect("a BadRequest"))
-            .expect("a BadRequest");
-        assert_eq!(request.field_violations[0].field, "requests[2].name");
-        // The other details are as they were.
-        assert_eq!(status.details.len(), 2);
-    }
-}
+mod tests;

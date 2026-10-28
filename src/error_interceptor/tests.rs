@@ -4,9 +4,8 @@
 //!
 //! What a client reads is the Connect error body, so each test calls over HTTP
 //! and reads the details back out of it.
-#![cfg(feature = "connect")]
-
-use aip::error::{ConnectErrorExt as _, debug_info, entry_status, error_info, resource_info};
+use super::ErrorInterceptor;
+use crate::error::{ConnectErrorExt as _, debug_info, entry_status, error_info, resource_info};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use buffa::Message as _;
 use buffa_protos::google::rpc::{DebugInfo, ErrorInfo, RequestInfo};
@@ -24,7 +23,7 @@ const OK: &str = "/example.v1.Shelves/Ok";
 /// cause and where.
 fn service(
     error: impl Fn() -> ConnectError + Clone + Send + Sync + 'static,
-    interceptor: aip::error::ErrorInterceptor,
+    interceptor: ErrorInterceptor,
 ) -> ConnectRpcService {
     let fail = move |_, _: Empty| {
         let error = error();
@@ -83,7 +82,7 @@ fn built() -> ConnectError {
 
 #[tokio::test]
 async fn the_client_gets_the_error_without_its_debug_info() {
-    let service = service(built, aip::error::ErrorInterceptor::new());
+    let service = service(built, ErrorInterceptor::new());
 
     let (_, error) = call(&service, FAIL).await;
 
@@ -96,7 +95,7 @@ async fn the_client_gets_the_error_without_its_debug_info() {
 
 #[tokio::test]
 async fn the_cause_never_reaches_the_client() {
-    let service = service(built, aip::error::ErrorInterceptor::new());
+    let service = service(built, ErrorInterceptor::new());
 
     let (body, _) = call(&service, FAIL).await;
 
@@ -108,7 +107,7 @@ async fn the_cause_never_reaches_the_client() {
 async fn an_error_that_has_an_error_info_keeps_it() {
     let service = service(
         built,
-        aip::error::ErrorInterceptor::new().with_default_error_info("other.example.com"),
+        ErrorInterceptor::new().with_default_error_info("other.example.com"),
     );
 
     let (_, error) = call(&service, FAIL).await;
@@ -123,7 +122,7 @@ async fn an_error_that_has_an_error_info_keeps_it() {
 async fn an_error_that_has_none_gets_its_code_as_the_reason() {
     let service = service(
         || ConnectError::invalid_argument("The request contains invalid parameters"),
-        aip::error::ErrorInterceptor::new().with_default_error_info("example.com"),
+        ErrorInterceptor::new().with_default_error_info("example.com"),
     );
 
     let (_, error) = call(&service, FAIL).await;
@@ -137,7 +136,7 @@ async fn an_error_that_has_none_gets_its_code_as_the_reason() {
 async fn an_error_gets_no_error_info_unless_asked_to() {
     let service = service(
         || ConnectError::invalid_argument("The request contains invalid parameters"),
-        aip::error::ErrorInterceptor::new(),
+        ErrorInterceptor::new(),
     );
 
     let (_, error) = call(&service, FAIL).await;
@@ -149,7 +148,7 @@ async fn an_error_gets_no_error_info_unless_asked_to() {
 async fn the_request_id_is_sent_as_a_request_info() {
     let service = service(
         built,
-        aip::error::ErrorInterceptor::new().with_request_id(|ctx| {
+        ErrorInterceptor::new().with_request_id(|ctx| {
             ctx.header("x-request-id")
                 .and_then(|id| id.to_str().ok())
                 .map(str::to_owned)
@@ -169,10 +168,7 @@ async fn the_request_id_is_sent_as_a_request_info() {
 
 #[tokio::test]
 async fn a_request_with_no_id_gets_no_request_info() {
-    let service = service(
-        built,
-        aip::error::ErrorInterceptor::new().with_request_id(|_| None),
-    );
+    let service = service(built, ErrorInterceptor::new().with_request_id(|_| None));
 
     let (_, error) = call(&service, FAIL).await;
 
@@ -188,14 +184,14 @@ async fn the_other_details_are_sent_as_the_handler_built_them() {
             f.write_str("shelves/s1")
         }
     }
-    impl aip::ResourceName for Shelf {
+    impl crate::ResourceName for Shelf {
         fn resource_type(&self) -> &str {
             "example.com/Shelf"
         }
         fn pattern(&self) -> &str {
             "shelves/{shelf}"
         }
-        fn validate(&self) -> Result<(), aip::resource::InvalidResourceIdError> {
+        fn validate(&self) -> Result<(), crate::resource::InvalidResourceIdError> {
             Ok(())
         }
         fn contains_wildcard(&self) -> bool {
@@ -205,7 +201,7 @@ async fn the_other_details_are_sent_as_the_handler_built_them() {
 
     let service = service(
         || built().with_detail(resource_info(&Shelf)),
-        aip::error::ErrorInterceptor::new(),
+        ErrorInterceptor::new(),
     );
 
     let (_, error) = call(&service, FAIL).await;
@@ -218,7 +214,7 @@ async fn the_other_details_are_sent_as_the_handler_built_them() {
 
 #[tokio::test]
 async fn a_call_that_succeeds_is_answered_as_it_is() {
-    let service = service(built, aip::error::ErrorInterceptor::new());
+    let service = service(built, ErrorInterceptor::new());
     let request = http::Request::post(OK)
         .header("content-type", "application/proto")
         .body(Full::new(Bytes::new()))
