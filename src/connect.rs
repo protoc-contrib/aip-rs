@@ -222,11 +222,33 @@ where
     clear::<M>(payload, FieldBehaviorKind::InputOnly)
 }
 
+/// What a body that does not decode is answered with: connectrpc's own text
+/// carries the decoder's, which for JSON quotes the value that did not parse.
+const MALFORMED_MESSAGE: &str = "The request could not be processed due to malformed data";
+
+/// `payload` read as an `M`. A body that does not decode is answered with a
+/// fixed message, the decoder's text kept as the error's source for the log, as
+/// aip-go does: the first read of a request is the one that fails, and it is
+/// this interceptor's, so an `InvalidArgument` from it is that failure and no
+/// other. Any other error, such as a payload that is not an `M`, is passed on.
+fn decode<M>(payload: &Payload) -> Result<&M, ConnectError>
+where
+    M: buffa::Message + JsonSerialize + JsonDeserialize + 'static,
+{
+    payload.message::<M>().map_err(|error| {
+        if error.code == ErrorCode::InvalidArgument {
+            ConnectError::invalid_argument(MALFORMED_MESSAGE).with_source(error)
+        } else {
+            error
+        }
+    })
+}
+
 fn clear<M>(payload: &mut Payload, kind: FieldBehaviorKind) -> Result<(), ConnectError>
 where
     M: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
 {
-    let mut message = payload.message::<M>()?.clone();
+    let mut message = decode::<M>(payload)?.clone();
     message.clear_fields(kind);
     payload.set_message(message);
     Ok(())
@@ -275,7 +297,7 @@ where
         + Validate
         + 'static,
 {
-    let mut request = payload.message::<M>()?.clone();
+    let mut request = decode::<M>(payload)?.clone();
     request.clear_fields(FieldBehaviorKind::OutputOnly);
     imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
 

@@ -36,6 +36,10 @@
 //! - AIP-203 field behavior -- [`FieldBehavior`], which clears and validates
 //!   the fields of a [`FieldBehaviorKind`], within a [`FieldScope`], reporting
 //!   a [`FieldBehaviorError`] with a [`FieldPath`] per field
+//! - AIP-193 errors -- with the `connect` feature, the [`error`] module builds
+//!   the details an error carries, the `google.rpc.Status` of a failed batch
+//!   entry, and [`ErrorInterceptor`](error::ErrorInterceptor), which logs a
+//!   failed call and answers it without its `DebugInfo`
 //! - [`FieldBehaviorSet`] -- a set of kinds, e.g. what one field is annotated
 //!   with; with the `descriptor` feature, `FieldDescriptorExt::field_behaviors`
 //!   reads it off a buffa-descriptor `FieldDescriptor`
@@ -61,6 +65,8 @@
 pub mod connect;
 #[cfg(feature = "descriptor")]
 pub mod descriptor;
+#[cfg(feature = "connect")]
+pub mod error;
 pub mod field_behavior;
 pub mod field_path;
 pub mod resource;

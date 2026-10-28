@@ -38,6 +38,11 @@ buffa-descriptor = { version = "0.9.2", optional = true }
 # without `json`, serde with it, which buffa's generated messages then carry.
 connectrpc = { version = "0.9", default-features = false, optional = true }
 futures-util = { version = "0.3", optional = true }
+# Behind `connect`: an error detail travels as base64 text in Connect, which a
+# batch entry's Status carries as bytes, and the interceptor reads back.
+base64 = { version = "0.22", optional = true }
+# Behind `connect`: where ErrorInterceptor writes down a failed call.
+tracing = { version = "0.1", optional = true }
 # Its default `connect` feature is what renders violations as a Connect error.
 protovalidate-buffa = { version = "0.7.2", optional = true }
 # A create's server-assigned id, a UUIDv7 so ids sort by creation time.
@@ -46,14 +51,16 @@ uuid = { version = "1", features = ["v7"], optional = true }
 [features]
 default = ["connect"]
 # FieldBehaviorInterceptor and what it is built from: Procedure, ResourceWrites,
-# DynResource. On by default; `default-features = false` drops connectrpc,
+# DynResource; and the AIP-193 error model, `aip::error`. On by default; `default-features = false` drops connectrpc,
 # protovalidate-buffa and uuid for a consumer that does not serve Connect.
 connect = [
+    "dep:base64",
     "dep:buffa",
     "dep:buffa-protos",
     "dep:connectrpc",
     "dep:futures-util",
     "dep:protovalidate-buffa",
+    "dep:tracing",
     "dep:uuid",
 ]
 # FieldDescriptorExt: a buffa-descriptor FieldDescriptor's FieldBehaviorSet.
@@ -68,6 +75,9 @@ buffa-descriptor = { version = "0.9.2", features = ["reflect"] }
 # connectrpc's tree.
 futures-util = "0.3"
 http = "1"
+# The Connect error body, read back as a client reads it.
+serde_json = "1"
+bytes = "1"
 http-body-util = "0.1"
 tokio = { version = "1", features = ["macros", "rt"] }
 tower = { version = "0.5", features = ["util"] }

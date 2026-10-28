@@ -750,8 +750,15 @@ async fn a_body_that_does_not_decode_is_refused_before_the_handler() {
         "the handler ran: {:?}",
         seen.requests
     );
-    let (code, _, _) = seen.error.clone().expect("an error");
+    let (code, message, source) = seen.error.clone().expect("an error");
     assert_eq!(code, ErrorCode::InvalidArgument);
+    // Fixed, since the decoder's own text can carry the value; that text is
+    // the source, for the log.
+    assert_eq!(
+        message,
+        "The request could not be processed due to malformed data"
+    );
+    assert!(source.contains("failed to decode proto"), "{source}");
 }
 
 #[tokio::test]

@@ -90,6 +90,27 @@ The public surface of `aip::connect` is that and no more:
 `ResourceWrites`, `ResourceWrite`,
 `WriteMethod`, `DynResource` (every `Resource` is one) and `validate`.
 
+## The error model
+
+`aip::error` (the `connect` feature) is the AIP-193 error model of a Connect
+server, the Rust counterpart of aip-go's `errors.go` and `error_interceptor.go`.
+Nothing in it knows a service: the domain of an `ErrorInfo`, its reasons and the
+public messages are the service's, and it builds its errors from these parts.
+
+| | |
+| --- | --- |
+| details | `error_info(domain, reason)`, `resource_info(name)`, `retry_info(delay)`, `bad_request(field_error)` -- with a fixed description, since the error's own text can carry the value --, `debug_info(cause)` and `request_info(id)`; `find_detail::<M>(&error)` reads one back |
+| a batch entry | `error.to_status()` is the `google.rpc.Status` of a failed entry of a `Batch*` response, less its `DebugInfo`; `error.to_entry_status(i)` names the fields of its `BadRequest` under `requests[i]`; `log_entry` logs the entries that were the server's fault |
+| `ErrorInterceptor` | logs each failed unary call once, at ERROR for a fault the request did not cause (`Internal`, `Unknown`, `DataLoss`, `Unavailable`) and WARN for a caller's mistake, with the cause and the stack of its `DebugInfo`, then answers without that `DebugInfo`. `with_default_error_info(domain)` gives an error with no `ErrorInfo` one, its code as the reason; `with_request_id(f)` sends the request's id as a `RequestInfo` |
+
+A body that does not decode is answered by `FieldBehaviorInterceptor` with a
+fixed message, "The request could not be processed due to malformed data": the
+decoder's text can quote the value, so it is kept as the error's source, for the
+log.
+
+Register `ErrorInterceptor` first, so what the interceptors after it refuse is
+logged and answered the same way.
+
 ## Scope: what is deliberately not here
 
 **Ordering and paging.** `order_by` and page tokens are the query layer's: how
