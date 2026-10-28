@@ -121,7 +121,7 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 | --- | --- | --- |
 | `NewErrorInfo`, `NewResourceInfo`, `NewRetryInfo`, `NewBadRequest`, `NewDebugInfo` | `error::error_info`, `resource_info`, `retry_info`, `bad_request`, `debug_info` | `bad_request` takes a `&FieldError<E>`, where Go panics on an error that is not one |
 | `NewErrorDetail` | `ErrorDetail::from_message` | connectrpc's |
-| `NameRequestError` | `error::name_request_error::<M>` | |
+| `NameRequestError` | `FieldError::of_name::<M>` | |
 | `NewStatus`, `NewEntryStatus` | `error::status`, `error::entry_status` | for a `ConnectError`: Rust has no other error to convert |
 | `ErrorLogLevel` | `error::log_level` | |
 | `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |

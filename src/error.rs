@@ -47,7 +47,7 @@ use connectrpc::{
     ConnectError, ErrorCode, ErrorDetail, Interceptor, Next, RequestContext, SpecOrigin,
 };
 
-use crate::{FieldError, FieldResolver, ResourceName};
+use crate::{FieldError, ResourceName};
 
 /// The `google.rpc.ErrorInfo` detail of an error (AIP-193): why it happened,
 /// as `reason`, in `domain`, the name of the service that generated it.
@@ -114,27 +114,6 @@ pub fn bad_request<E>(error: &FieldError<E>) -> ErrorDetail {
             ..BadRequest::default()
         },
     )
-}
-
-/// The [`FieldError`] for `error`, a failure to read an id from the resource
-/// name a request carries, such as a wildcard where an id is needed. The field
-/// is the request's own: its `name`, or its `parent` where it has no `name`
-/// (AIP-131 to AIP-135). As aip-go's `NameRequestError`.
-///
-/// # Panics
-///
-/// If `M` has neither field: a handler naming such a request is a bug.
-#[must_use]
-pub fn name_request_error<M: FieldResolver, E>(error: E) -> FieldError<E> {
-    let path = M::field_path("name")
-        .or_else(|| M::field_path("parent"))
-        .unwrap_or_else(|| {
-            panic!(
-                "`{}` has neither a name nor a parent field",
-                core::any::type_name::<M>()
-            )
-        });
-    FieldError::new(path, error)
 }
 
 /// The `google.rpc.RequestInfo` detail of an error that answers the request
@@ -490,36 +469,6 @@ mod tests {
         };
         assert_eq!(violation.field, "name");
         assert_eq!(violation.description, "value is invalid");
-    }
-
-    /// A request with the fields it is given, as the generated impls name them.
-    struct Fields<const NAME: bool, const PARENT: bool>;
-
-    impl<const NAME: bool, const PARENT: bool> FieldResolver for Fields<NAME, PARENT> {
-        fn field_path(name: &str) -> Option<crate::FieldPath> {
-            use crate::{FieldPath, FieldType};
-            match name {
-                "name" if NAME => Some(FieldPath::field("name", 1, FieldType::String)),
-                "parent" if PARENT => Some(FieldPath::field("parent", 1, FieldType::String)),
-                _ => None,
-            }
-        }
-    }
-
-    #[test]
-    fn a_name_failure_is_about_the_name_or_else_the_parent() {
-        let error = name_request_error::<Fields<true, true>, _>("a wildcard");
-        assert_eq!(error.path().to_string(), "name");
-
-        let error = name_request_error::<Fields<false, true>, _>("a wildcard");
-        assert_eq!(error.path().to_string(), "parent");
-        assert_eq!(*error.failure(), "a wildcard");
-    }
-
-    #[test]
-    #[should_panic(expected = "neither a name nor a parent")]
-    fn a_name_failure_of_a_request_with_no_name_is_a_bug() {
-        let _ = name_request_error::<Fields<false, false>, _>("a wildcard");
     }
 
     #[test]
