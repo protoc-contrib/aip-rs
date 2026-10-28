@@ -369,14 +369,6 @@ fn returned(book: Option<Book>) -> Book {
 
 /// A service routing the procedures above, through `FieldBehaviorInterceptor`.
 fn service(seen: &Arc<Mutex<Seen>>) -> ConnectRpcService {
-    service_with(seen, FieldBehaviorInterceptor::new(PROCEDURES))
-}
-
-/// [`service`], through `interceptor`.
-fn service_with(
-    seen: &Arc<Mutex<Seen>>,
-    interceptor: FieldBehaviorInterceptor,
-) -> ConnectRpcService {
     let create = {
         let seen = Arc::clone(seen);
         move |_, request: CreateBookRequest| {
@@ -458,7 +450,7 @@ fn service_with(
 
     ConnectRpcService::new(router)
         .with_interceptor(Record(Arc::clone(seen)))
-        .with_interceptor(interceptor)
+        .with_interceptor(FieldBehaviorInterceptor::new(PROCEDURES))
 }
 
 /// Calls the unary `procedure` with `body`, over the Connect protocol: the
@@ -572,39 +564,6 @@ async fn a_create_is_cleared_and_filled_in_on_the_way_in_and_cleared_on_the_way_
     // INPUT_ONLY cleared on the response; OUTPUT_ONLY is the server's to set.
     assert_eq!(response.secret, "");
     assert_eq!(response.create_time, "2026-01-01T00:00:00Z");
-}
-
-#[tokio::test]
-async fn a_create_that_omits_its_id_gets_one_in_the_services_own_scheme() {
-    let seen = Arc::new(Mutex::new(Seen::default()));
-    let service = service_with(
-        &seen,
-        FieldBehaviorInterceptor::new(PROCEDURES).with_id_generator(|| "slug-1".to_owned()),
-    );
-    let request = |book_id: &str| CreateBookRequest {
-        book_id: book_id.to_owned(),
-        book: Some(book("Dune")),
-    };
-
-    let _: Book = unary(&service, CREATE, request("").encode_to_vec())
-        .await
-        .expect("created");
-    // An id the client sent is kept.
-    let _: Book = unary(&service, CREATE, request("dune").encode_to_vec())
-        .await
-        .expect("created");
-
-    let seen = seen.lock().unwrap();
-    assert!(
-        seen.requests[0].contains(r#"book_id: "slug-1""#),
-        "{}",
-        seen.requests[0]
-    );
-    assert!(
-        seen.requests[1].contains(r#"book_id: "dune""#),
-        "{}",
-        seen.requests[1]
-    );
 }
 
 #[tokio::test]

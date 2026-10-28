@@ -142,7 +142,7 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 | `FieldBehaviorKind`, `FieldBehaviorSet` (`Has`, `HasAny`, `All`), `FieldBehaviorsOf` | `FieldBehaviorKind`, `FieldBehaviorSet` (`contains`, `intersects`, `iter`), `FieldDescriptorExt` | |
 | `ClearFields`, `ValidateFields`, `FieldBehaviorError` | `FieldBehavior::clear_fields`, `validate_fields`, `FieldBehaviorError` | generated, as there is no reflection |
 | `ImpliedFieldMask`, `ClearFieldMask` | `Resource::implied_field_mask`, `clear_field_mask` | |
-| `NewFieldBehaviorInterceptor`, `WithIDGenerator` | `FieldBehaviorInterceptor::new(PROCEDURES)`, `with_id_generator` | the table stands for reflection; UUIDv7 by default |
+| `NewFieldBehaviorInterceptor` | `FieldBehaviorInterceptor::new(PROCEDURES)` | the table stands for reflection |
 | `ResourceWrites`, `ResourceWrite`, `ResourceCreate`, `ResourceUpdate` | `ResourceWrites::for_each_write`, `ResourceWrite`, `WriteMethod::{Create, Update}` | an enum where Go has two optional pointers |
 | `ResourceWildcard`, `ValidateResourceID`, `ContainsWildcard` | `resource::WILDCARD`, `validate_resource_id`, `contains_wildcard` | |
 | `ResourcePattern` and its methods | `ResourcePattern`: `compile`, `as_str`, `variables`, `variable_names`, `scan`, `scan_full`, `invalid_value`, `invalid_id`, `format`, `validate` | `MustCompileResourcePattern` is `.parse().expect(..)` |

@@ -60,17 +60,6 @@ use protovalidate_buffa::{
 
 use crate::{FieldBehavior, FieldBehaviorKind, FieldPath, FieldScope, FieldType, Resource, Step};
 
-/// How a create's omitted `<resource>_id` is made: see
-/// [`FieldBehaviorInterceptor::with_id_generator`].
-pub type NewId = fn() -> String;
-
-/// A UUIDv7, so server-assigned ids sort by creation time: the default of
-/// [`FieldBehaviorInterceptor::with_id_generator`].
-#[must_use]
-pub fn uuid_v7() -> String {
-    uuid::Uuid::now_v7().to_string()
-}
-
 /// One procedure's message types, as the steps [`FieldBehaviorInterceptor`]
 /// applies to it: `inbound` to each message the server receives, `outbound` to
 /// each message it sends. Each step decodes the message from the payload as
@@ -78,14 +67,13 @@ pub fn uuid_v7() -> String {
 ///
 /// Built with [`Procedure::new`] or [`Procedure::clear`]; the fields are
 /// public so a caller can apply exactly what the interceptor would, e.g.
-/// `(procedure.inbound)(&mut payload, uuid_v7)`.
+/// `(procedure.inbound)(&mut payload)`.
 #[derive(Debug, Clone, Copy)]
 pub struct Procedure {
     /// The procedure's path, e.g. `/acme.v1.Books/CreateBook`.
     pub path: &'static str,
-    /// Applied to each message the server receives, with how an omitted create
-    /// id is made.
-    pub inbound: fn(&mut Payload, NewId) -> Result<(), ConnectError>,
+    /// Applied to each message the server receives.
+    pub inbound: fn(&mut Payload) -> Result<(), ConnectError>,
     /// Applied to each message the server sends.
     pub outbound: fn(&mut Payload) -> Result<(), ConnectError>,
 }
@@ -110,7 +98,7 @@ impl Procedure {
     {
         Self {
             path,
-            inbound: validate_with::<Req>,
+            inbound: validate::<Req>,
             outbound: clear_input_only::<Resp>,
         }
     }
@@ -151,26 +139,13 @@ impl Procedure {
 #[derive(Debug, Clone, Copy)]
 pub struct FieldBehaviorInterceptor {
     procedures: &'static [Procedure],
-    new_id: NewId,
 }
 
 impl FieldBehaviorInterceptor {
     /// An interceptor for the procedures `procedures` names.
     #[must_use]
     pub const fn new(procedures: &'static [Procedure]) -> Self {
-        Self {
-            procedures,
-            new_id: uuid_v7,
-        }
-    }
-
-    /// How a create's omitted `<resource>_id` is made (AIP-133): the id scheme
-    /// is the service's. The default is [`uuid_v7`], so server-assigned ids sort
-    /// by creation time. As aip-go's `WithIDGenerator`.
-    #[must_use]
-    pub const fn with_id_generator(mut self, new_id: NewId) -> Self {
-        self.new_id = new_id;
-        self
+        Self { procedures }
     }
 
     /// The procedure a server is serving in `ctx`, if `procedures` lists it.
@@ -195,7 +170,7 @@ impl Interceptor for FieldBehaviorInterceptor {
         let Some(procedure) = self.procedure(&request.ctx) else {
             return next.run(request).await;
         };
-        (procedure.inbound)(&mut request.payload, self.new_id)?;
+        (procedure.inbound)(&mut request.payload)?;
         let mut response = next.run(request).await?;
         (procedure.outbound)(&mut response.body)?;
         Ok(response)
@@ -210,10 +185,8 @@ impl Interceptor for FieldBehaviorInterceptor {
         let Some(procedure) = self.procedure(&request.ctx) else {
             return next.run(request, inbound).await;
         };
-        let (on_inbound, on_outbound, new_id) =
-            (procedure.inbound, procedure.outbound, self.new_id);
-        let inbound: PayloadStream =
-            Box::pin(inbound.map(move |item| apply(|payload| on_inbound(payload, new_id), item)));
+        let (on_inbound, on_outbound) = (procedure.inbound, procedure.outbound);
+        let inbound: PayloadStream = Box::pin(inbound.map(move |item| apply(on_inbound, item)));
         let response = next.run(request, inbound).await?;
         Ok(response.map_body(move |body| -> PayloadStream {
             Box::pin(body.map(move |item| apply(on_outbound, item)))
@@ -233,7 +206,7 @@ pub(crate) fn apply(
 
 /// [`Procedure::clear`]'s inbound step: `OUTPUT_ONLY` cleared on a
 /// payload holding an `M`.
-fn clear_output_only<M>(payload: &mut Payload, _: NewId) -> Result<(), ConnectError>
+fn clear_output_only<M>(payload: &mut Payload) -> Result<(), ConnectError>
 where
     M: buffa::Message + JsonSerialize + JsonDeserialize + Clone + FieldBehavior + 'static,
 {
@@ -324,29 +297,9 @@ where
         + Validate
         + 'static,
 {
-    validate_with::<M>(payload, uuid_v7)
-}
-
-/// [`validate`], with a create's omitted id made by `new_id` in place of
-/// [`uuid_v7`]: what [`FieldBehaviorInterceptor::with_id_generator`] sets.
-///
-/// # Errors
-///
-/// As [`validate`].
-pub fn validate_with<M>(payload: &mut Payload, new_id: NewId) -> Result<(), ConnectError>
-where
-    M: buffa::Message
-        + JsonSerialize
-        + JsonDeserialize
-        + Clone
-        + FieldBehavior
-        + ResourceWrites
-        + Validate
-        + 'static,
-{
     let mut request = decode::<M>(payload)?.clone();
     request.clear_fields(FieldBehaviorKind::OutputOnly);
-    imply(&mut request, &mut || new_id());
+    imply(&mut request, &mut || uuid::Uuid::now_v7().to_string());
 
     // Step 3: protovalidate's violations, then a `required` one per path
     // `required_paths` finds. A rule that failed to compile or run is answered

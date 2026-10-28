@@ -75,8 +75,7 @@ pub mod resource;
 
 #[cfg(feature = "connect")]
 pub use connect::{
-    DynResource, FieldBehaviorInterceptor, NewId, Procedure, ResourceWrite, ResourceWrites,
-    WriteMethod, uuid_v7,
+    DynResource, FieldBehaviorInterceptor, Procedure, ResourceWrite, ResourceWrites, WriteMethod,
 };
 #[cfg(feature = "descriptor")]
 pub use descriptor::FieldDescriptorExt;
