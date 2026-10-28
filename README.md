@@ -170,6 +170,7 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 | `ResourceWildcard`, `ValidateResourceID`, `ContainsWildcard` | `resource::WILDCARD`, `validate_resource_id`, `contains_wildcard` | |
 | `ResourcePattern` and its methods | `ResourcePattern`: `compile`, `as_str`, `variables`, `variable_names`, `scan`, `scan_full`, `invalid_value`, `invalid_id`, `format`, `validate` | `MustCompileResourcePattern` is `.parse().expect(..)` |
 | `ResourceName` | `ResourceName` | `Type` is `resource_type`, `type` being a keyword |
+| a name's `string` segments, the wildcard among them; `Validate`, `ParseItemID` | `Segment<T>` (an id or `-`); `validate`, `<segment>_id()` | a generated name holds a segment declared as a `Uuid` as a `Segment<Uuid>`, so it is typed and can still be the wildcard; asking it for its id answers `SegmentError` for `-`, as `ParseItemID` fails |
 | `ParseError`, `ErrInvalidResourceName` | `ParseError` with `kind()`, `pattern()` and `name()` | `errors.Is` is the type |
 | `RequestPreparer`, `NewPrepareInterceptor(reject)` | `RequestPreparer`, `PrepareInterceptor::new(PREPARERS).with_reject(..)` | a table of `Preparer`s stands for reflection; a request's failure is a `FieldError<PrepareFailure>`, so it always names a field |
 

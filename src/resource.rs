@@ -16,6 +16,107 @@ use crate::{FieldBehavior, FieldBehaviorKind, FieldScope};
 /// See <https://google.aip.dev/159>.
 pub const WILDCARD: &str = "-";
 
+/// A variable segment of a resource name whose id is typed: an id, or the
+/// AIP-159 [`WILDCARD`].
+///
+/// What a generated name holds for a segment declared as something narrower
+/// than a string -- a `Uuid`, say -- which no `-` parses as. A name read with
+/// the wildcard in it is a name to read across, not a resource to write:
+/// [`ResourceName::validate`] refuses it, and [`SegmentError`] is what asking
+/// it for its id answers. As aip-go's names, which hold every segment as a
+/// string, check with `Validate` and `ParseItemID`.
+///
+/// ```
+/// use aip::resource::Segment;
+///
+/// let id: Segment<u32> = "7".parse::<u32>().map(Segment::Id)?;
+/// assert_eq!(id.to_string(), "7");
+/// assert_eq!(id.id(), Some(&7));
+///
+/// let any = Segment::<u32>::Wildcard;
+/// assert_eq!(any.to_string(), "-");
+/// assert!(any.is_wildcard());
+/// # Ok::<_, std::num::ParseIntError>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Segment<T> {
+    /// The AIP-159 wildcard, `-`: every value of the segment.
+    Wildcard,
+    /// A single id.
+    Id(T),
+}
+
+impl<T> Segment<T> {
+    /// Whether this is the wildcard.
+    #[must_use]
+    pub const fn is_wildcard(&self) -> bool {
+        matches!(self, Self::Wildcard)
+    }
+
+    /// The id, or `None` for the wildcard.
+    #[must_use]
+    pub const fn id(&self) -> Option<&T> {
+        match self {
+            Self::Id(id) => Some(id),
+            Self::Wildcard => None,
+        }
+    }
+
+    /// The id, or [`SegmentError`] naming `segment` for the wildcard, which is
+    /// no id.
+    ///
+    /// # Errors
+    ///
+    /// [`SegmentError`] if this is the wildcard.
+    pub fn into_id(self, segment: &'static str) -> Result<T, SegmentError> {
+        match self {
+            Self::Id(id) => Ok(id),
+            Self::Wildcard => Err(SegmentError { segment }),
+        }
+    }
+}
+
+impl<T> From<T> for Segment<T> {
+    fn from(id: T) -> Self {
+        Self::Id(id)
+    }
+}
+
+/// Writes the id, or `-` for the wildcard.
+impl<T: fmt::Display> fmt::Display for Segment<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Id(id) => id.fmt(f),
+            Self::Wildcard => f.write_str(WILDCARD),
+        }
+    }
+}
+
+/// A segment that is the wildcard where an id is needed.
+///
+/// What [`Segment::into_id`] answers, and a generated name's `<segment>_id`
+/// accessors: aip-go's `ParseItemID` failing for `-`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SegmentError {
+    segment: &'static str,
+}
+
+impl SegmentError {
+    /// The variable segment at fault, as the pattern names it.
+    #[must_use]
+    pub const fn segment(&self) -> &'static str {
+        self.segment
+    }
+}
+
+impl fmt::Display for SegmentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: the wildcard is not an id", self.segment)
+    }
+}
+
+impl core::error::Error for SegmentError {}
+
 /// A compiled resource name pattern, such as
 /// `publishers/{publisher}/books/{book}`.
 ///
@@ -50,14 +151,14 @@ pub const WILDCARD: &str = "-";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourcePattern {
     pattern: String,
-    segments: Vec<Segment>,
+    segments: Vec<Part>,
     /// How many of `segments` are variables, cached because every scan and
     /// format checks its arity against it.
     variables: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Segment {
+enum Part {
     /// Text the name must match exactly.
     Literal(String),
     /// A segment that captures a value, by its variable name (without
@@ -65,7 +166,7 @@ enum Segment {
     Variable(String),
 }
 
-impl Segment {
+impl Part {
     /// The variable name, if this segment captures a value.
     fn variable(&self) -> Option<&str> {
         match self {
@@ -98,7 +199,7 @@ impl ResourcePattern {
         if pattern.is_empty() {
             return Err(error(CompileErrorKind::EmptyPattern));
         }
-        let mut segments: Vec<Segment> = Vec::new();
+        let mut segments: Vec<Part> = Vec::new();
         for (index, part) in pattern.split('/').enumerate() {
             let malformed = || error(CompileErrorKind::MalformedSegment(part.to_owned()));
             let Some(name) = part.strip_prefix('{') else {
@@ -111,7 +212,7 @@ impl ResourcePattern {
                 if !is_collection_id(part) {
                     return Err(error(CompileErrorKind::InvalidLiteral(part.to_owned())));
                 }
-                segments.push(Segment::Literal(part.to_owned()));
+                segments.push(Part::Literal(part.to_owned()));
                 continue;
             };
             let Some(name) = name.strip_suffix('}') else {
@@ -135,9 +236,9 @@ impl ResourcePattern {
             {
                 return Err(error(CompileErrorKind::DuplicateVariable(name.to_owned())));
             }
-            segments.push(Segment::Variable(name.to_owned()));
+            segments.push(Part::Variable(name.to_owned()));
         }
-        let variables = segments.iter().filter_map(Segment::variable).count();
+        let variables = segments.iter().filter_map(Part::variable).count();
         Ok(Self {
             pattern: pattern.to_owned(),
             segments,
@@ -159,7 +260,7 @@ impl ResourcePattern {
 
     /// Returns the variable segment names, in pattern order.
     pub fn variable_names(&self) -> impl Iterator<Item = &str> {
-        self.segments.iter().filter_map(Segment::variable)
+        self.segments.iter().filter_map(Part::variable)
     }
 
     /// Matches `name` against the pattern and returns its variable segments,
@@ -213,7 +314,7 @@ impl ResourcePattern {
         // when a later segment turns out not to match.
         for (index, (segment, part)) in self.segments.iter().zip(name.split('/')).enumerate() {
             match segment {
-                Segment::Literal(literal) => {
+                Part::Literal(literal) => {
                     if part != literal {
                         return Err(error(ParseErrorKind::Literal {
                             index,
@@ -222,7 +323,7 @@ impl ResourcePattern {
                         }));
                     }
                 }
-                Segment::Variable(variable) => {
+                Part::Variable(variable) => {
                     if part.is_empty() {
                         return Err(error(ParseErrorKind::EmptyValue {
                             index,
@@ -236,7 +337,7 @@ impl ResourcePattern {
             self.segments
                 .iter()
                 .zip(name.split('/'))
-                .filter(|(segment, _)| matches!(segment, Segment::Variable(_)))
+                .filter(|(segment, _)| matches!(segment, Part::Variable(_)))
                 .map(|(_, part)| part),
         ) {
             *value = part;
@@ -318,8 +419,8 @@ impl ResourcePattern {
                 .segments
                 .iter()
                 .map(|segment| match segment {
-                    Segment::Literal(literal) => literal.len(),
-                    Segment::Variable(_) => 0,
+                    Part::Literal(literal) => literal.len(),
+                    Part::Variable(_) => 0,
                 })
                 .sum::<usize>()
             + values
@@ -333,8 +434,8 @@ impl ResourcePattern {
                 out.push('/');
             }
             match segment {
-                Segment::Literal(literal) => out.push_str(literal),
-                Segment::Variable(_) => {
+                Part::Literal(literal) => out.push_str(literal),
+                Part::Variable(_) => {
                     out.push_str(values[next].as_ref());
                     next += 1;
                 }
@@ -935,6 +1036,16 @@ impl InvalidResourceIdError {
         }
     }
 
+    /// The error for a typed variable segment that is the [`WILDCARD`], which
+    /// is no id to write.
+    #[must_use]
+    pub fn wildcard(segment: &str) -> Self {
+        Self {
+            segment: Some(segment.to_owned()),
+            kind: InvalidResourceIdErrorKind::Wildcard,
+        }
+    }
+
     /// Returns the name of the variable segment at fault, if the ID was
     /// checked as part of a pattern.
     #[must_use]
@@ -958,6 +1069,8 @@ pub enum InvalidResourceIdErrorKind {
     /// The ID contains the `/` separator, which would split one segment into
     /// two.
     Separator,
+    /// The segment is the AIP-159 wildcard, where a typed id is needed.
+    Wildcard,
 }
 
 impl fmt::Display for InvalidResourceIdError {
@@ -968,6 +1081,7 @@ impl fmt::Display for InvalidResourceIdError {
         match self.kind {
             InvalidResourceIdErrorKind::Empty => f.write_str("empty"),
             InvalidResourceIdErrorKind::Separator => f.write_str("contains illegal character '/'"),
+            InvalidResourceIdErrorKind::Wildcard => f.write_str("the wildcard is not an id"),
         }
     }
 }
@@ -1533,5 +1647,37 @@ mod tests {
             ),
             ["carrier", "notes"]
         );
+    }
+
+    #[test]
+    fn a_segment_is_an_id_or_the_wildcard() {
+        let id = Segment::Id(7_u32);
+        let any = Segment::<u32>::Wildcard;
+
+        assert_eq!(
+            (id.to_string(), any.to_string()),
+            ("7".to_owned(), "-".to_owned())
+        );
+        assert_eq!((id.id(), any.id()), (Some(&7), None));
+        assert_eq!((id.is_wildcard(), any.is_wildcard()), (false, true));
+        assert_eq!(Segment::from(7_u32), id);
+    }
+
+    #[test]
+    fn the_wildcard_is_no_id() {
+        assert_eq!(Segment::Id(7_u32).into_id("item"), Ok(7));
+
+        let error = Segment::<u32>::Wildcard.into_id("item").unwrap_err();
+        assert_eq!(error.segment(), "item");
+        assert_eq!(error.to_string(), "item: the wildcard is not an id");
+    }
+
+    #[test]
+    fn a_wildcard_is_an_invalid_id_to_write() {
+        let error = InvalidResourceIdError::wildcard("item");
+
+        assert_eq!(error.segment(), Some("item"));
+        assert_eq!(error.kind(), &InvalidResourceIdErrorKind::Wildcard);
+        assert_eq!(error.to_string(), "item: the wildcard is not an id");
     }
 }

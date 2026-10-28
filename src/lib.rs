@@ -87,7 +87,7 @@ pub use request::{
     },
     writes::{DynResource, ResourceWrite, ResourceWrites, WriteMethod},
 };
-pub use resource::{Resource, ResourceName, ResourcePattern};
+pub use resource::{Resource, ResourceName, ResourcePattern, Segment};
 
 // Not implemented here, deliberately:
 //
