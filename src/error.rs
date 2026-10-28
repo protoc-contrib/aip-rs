@@ -29,8 +29,9 @@
 //! out of a response -- and with the request's id as a `RequestInfo`, which a
 //! client can quote. A failed entry of a `Batch*` response is an error that is
 //! not returned but carried, as a `google.rpc.Status`: [`entry_status`]
-//! builds it the same way, and [`log_entry`] logs the entries that were the
-//! server's fault.
+//! builds it the same way. Nothing wraps the response to find such an entry,
+//! as aip-go's interceptor does, so whatever builds one logs it, as
+//! [`log_level`] says it should be.
 
 use std::{backtrace::Backtrace, sync::Arc, time::Duration};
 
@@ -262,22 +263,6 @@ fn build_status(
             .collect(),
         ..Status::default()
     }
-}
-
-/// Logs the failed entry at `index` of a `Batch*` response, when it was the
-/// server's fault -- [`log_level`] is ERROR -- with
-/// what failed underneath and where. An entry that was the caller's mistake is
-/// not logged: it is in the response for the caller to read.
-///
-/// A failed entry is not returned as an error, so [`ErrorInterceptor`] never
-/// sees it; whatever builds the entry's status calls this beside it.
-pub fn log_entry(error: &ConnectError, index: usize) {
-    if log_level(error.code) != tracing::Level::ERROR {
-        return;
-    }
-    let reason = error.message.as_deref().unwrap_or_default();
-    let (source, stack) = causes(error);
-    tracing::error!(index, code = ?error.code, reason, source, stack, "batch entry failed");
 }
 
 /// What failed underneath `error`, which the client never sees, and where: the

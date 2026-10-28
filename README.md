@@ -100,7 +100,7 @@ public messages are the service's, and it builds its errors from these parts.
 | | |
 | --- | --- |
 | details | `error_info(domain, reason)`, `resource_info(name)`, `retry_info(delay)`, `bad_request(field_error)` -- with a fixed description, since the error's own text can carry the value --, `debug_info(cause)` and `request_info(id)`; `find_detail::<M>(&error)` reads one back |
-| a batch entry | `status(&error)` is the `google.rpc.Status` of a failed entry of a `Batch*` response, less its `DebugInfo`; `entry_status(&error, i)` names the fields of its `BadRequest` under `requests[i]`; `log_entry` logs the entries that were the server's fault |
+| a batch entry | `status(&error)` is the `google.rpc.Status` of a failed entry of a `Batch*` response, less its `DebugInfo`; `entry_status(&error, i)` names the fields of its `BadRequest` under `requests[i]` |
 | `ErrorInterceptor` | logs each failed unary call once, at ERROR for a fault the request did not cause (`Internal`, `Unknown`, `DataLoss`, `Unavailable`) and WARN for a caller's mistake, with the cause and the stack of its `DebugInfo`, then answers without that `DebugInfo`. `with_default_error_info(domain)` gives an error with no `ErrorInfo` one, its code as the reason; `with_request_id(f)` sends the request's id as a `RequestInfo` |
 
 A body that does not decode is answered by `FieldBehaviorInterceptor` with a
@@ -126,7 +126,7 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 | `ErrorLogLevel` | `error::log_level` | |
 | `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |
 | `WithErrorLogger` | none | the logs are `tracing` events |
-| the interceptor's `Send` over a batch response | `error::entry_status` and `log_entry`, called where the entry's status is built | an interceptor has no reflection to find the entries in |
+| the interceptor's `Send` over a batch response | `error::entry_status` and `log_level`, called where the entry's status is built | an interceptor has no reflection to find the entries in, so the caller logs them |
 | `FieldError`, `NewFieldError`, `FieldPath` | `FieldError<E>`, `FieldError::of::<M>`, `FieldPath::of::<M>` | `Err` is `failure()`, `Field()` is the path's `Display` |
 | `FieldBehaviorKind`, `FieldBehaviorSet` (`Has`, `HasAny`, `All`), `FieldBehaviorsOf` | `FieldBehaviorKind`, `FieldBehaviorSet` (`contains`, `intersects`, `iter`), `FieldDescriptorExt` | |
 | `ClearFields`, `ValidateFields`, `FieldBehaviorError` | `FieldBehavior::clear_fields`, `validate_fields`, `FieldBehaviorError` | generated, as there is no reflection |
