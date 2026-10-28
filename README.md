@@ -64,7 +64,7 @@ src/
 │   └── interceptor.rs     ErrorInterceptor
 └── request/               what a server does with a request (AIP-133, 134, 233, 234)
     ├── writes.rs          ResourceWrites
-    ├── interceptor.rs     FieldBehaviorInterceptor, Procedure
+    ├── behavior.rs        FieldBehaviorInterceptor, Procedure
     └── prepare.rs         RequestPreparer, PrepareInterceptor
 ```
 
@@ -94,7 +94,7 @@ the messages it passes on, the outbound ones included, and leaves a client's
 calls alone. Every message buffa and protoc-gen-rust-aip generate qualifies,
 the well-known types included (aip-rs gives them empty `FieldBehavior`
 impls), so a method taking `google.protobuf.Empty` needs nothing special.
-`aip::request::interceptor::validate::<M>` applies the inbound steps to a payload holding an
+`aip::request::behavior::validate::<M>` applies the inbound steps to a payload holding an
 `M`, exactly as the interceptor does, for a caller such as a handler test.
 
 **Names are the server's.** AIP-133 has the server build a created resource's

@@ -36,7 +36,7 @@ use connectrpc::{
 };
 use futures_util::StreamExt as _;
 
-use super::interceptor::{apply, decode};
+use super::behavior::{apply, decode};
 use crate::{
     FieldError,
     error::{bad_request, debug_info},

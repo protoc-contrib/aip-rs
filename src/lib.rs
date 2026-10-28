@@ -80,7 +80,7 @@ pub use field::{
 };
 #[cfg(feature = "connect")]
 pub use request::{
-    interceptor::{FieldBehaviorInterceptor, Procedure},
+    behavior::{FieldBehaviorInterceptor, Procedure},
     prepare::{
         PrepareError, PrepareFailure, PrepareInterceptor, Preparer, Reject, RequestPreparer,
         reject_prepare,

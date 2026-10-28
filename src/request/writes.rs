@@ -22,7 +22,7 @@ use crate::{FieldBehavior, FieldBehaviorKind, FieldPath, Resource};
 ///
 /// Every other request writes nothing, which the default says.
 ///
-/// [`validate`](super::interceptor::validate) is built on it; so is a service's own policy, such as filling
+/// [`validate`](super::behavior::validate) is built on it; so is a service's own policy, such as filling
 /// in ids its own way.
 pub trait ResourceWrites {
     /// Calls `f` with each resource this request writes: its own, or one per
