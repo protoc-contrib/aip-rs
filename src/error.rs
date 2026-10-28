@@ -236,25 +236,6 @@ pub fn entry_status(error: &ConnectError, index: usize) -> Status {
     })
 }
 
-/// `error` with an `ErrorInfo` in `domain`, its code as the reason --
-/// `INVALID_ARGUMENT`, `NOT_FOUND` -- first among its details, unless it has
-/// one already. AIP-193 asks for an `ErrorInfo` on every error; a service
-/// builds its own where it knows a reason more specific than the code, and this
-/// covers the errors it does not build. What aip-go's `WithDefaultErrorInfo`
-/// does to every error the interceptor answers, for one that never reaches it.
-#[must_use]
-pub fn with_default_error_info(mut error: ConnectError, domain: &str) -> ConnectError {
-    if !error
-        .details
-        .iter()
-        .any(|detail| detail.type_url == ErrorInfo::FULL_NAME)
-    {
-        let reason = error.code.as_str().to_ascii_uppercase();
-        error.details.insert(0, error_info(domain, &reason));
-    }
-    error
-}
-
 /// What [`status`] and [`entry_status`] share: the status of `error`, each of
 /// its details but the `DebugInfo` passed through `map`, which drops the ones it
 /// answers `None` for.
@@ -366,7 +347,7 @@ impl ErrorInterceptor {
     }
 
     /// Give an error that has no `ErrorInfo` one in `domain`, with its code as
-    /// the reason: see [`with_default_error_info`](fn@with_default_error_info).
+    /// the reason: see [`with_default_error_info`](Self::with_default_error_info).
     #[must_use]
     pub fn with_default_error_info(mut self, domain: impl Into<Arc<str>>) -> Self {
         self.domain = Some(domain.into());
@@ -419,8 +400,16 @@ impl Interceptor for ErrorInterceptor {
         error
             .details
             .retain(|detail| detail.type_url != DebugInfo::FULL_NAME);
-        if let Some(domain) = &self.domain {
-            error = with_default_error_info(error, domain);
+        if let Some(domain) = &self.domain
+            && !error
+                .details
+                .iter()
+                .any(|detail| detail.type_url == ErrorInfo::FULL_NAME)
+        {
+            // Its code as the reason -- `INVALID_ARGUMENT`, `NOT_FOUND` --
+            // first among its details.
+            let reason = error.code.as_str().to_ascii_uppercase();
+            error.details.insert(0, error_info(domain, &reason));
         }
         if let Some(request_id) = request_id {
             error.details.push(request_info(&request_id));
@@ -641,31 +630,5 @@ mod tests {
         assert_eq!(request.field_violations[0].field, "requests[2].name");
         // The other details are as they were.
         assert_eq!(status.details.len(), 2);
-    }
-
-    #[test]
-    fn an_error_with_no_error_info_gets_its_code_as_the_reason_first() {
-        let error = with_default_error_info(
-            ConnectError::invalid_argument("x").with_detail(request_info("r1")),
-            "example.com",
-        );
-
-        assert_eq!(error.details[0].type_url, ErrorInfo::FULL_NAME);
-        let info = find_detail::<ErrorInfo>(&error).expect("an ErrorInfo");
-        assert_eq!(info.reason, "INVALID_ARGUMENT");
-        assert_eq!(info.domain, "example.com");
-        assert_eq!(error.details.len(), 2);
-    }
-
-    #[test]
-    fn an_error_with_an_error_info_keeps_it() {
-        let error = with_default_error_info(
-            ConnectError::not_found("x").with_detail(error_info("example.com", "SHELF_NOT_FOUND")),
-            "example.com",
-        );
-
-        assert_eq!(error.details.len(), 1);
-        let info = find_detail::<ErrorInfo>(&error).expect("an ErrorInfo");
-        assert_eq!(info.reason, "SHELF_NOT_FOUND");
     }
 }
