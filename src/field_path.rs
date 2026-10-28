@@ -256,27 +256,6 @@ impl<E> FieldError<E> {
         Self::new(FieldPath::of::<M>(name), source)
     }
 
-    /// The failure `source` of reading an id from the resource name a request
-    /// carries, such as a wildcard where an id is needed. The field is the
-    /// request's own: its `name`, or its `parent` where it has no `name`
-    /// (AIP-131 to AIP-135). As aip-go's `NameRequestError`.
-    ///
-    /// # Panics
-    ///
-    /// If `M` has neither field: a handler naming such a request is a bug.
-    #[must_use]
-    pub fn of_name<M: FieldResolver>(source: E) -> Self {
-        let path = M::field_path("name")
-            .or_else(|| M::field_path("parent"))
-            .unwrap_or_else(|| {
-                panic!(
-                    "`{}` has neither a name nor a parent field",
-                    core::any::type_name::<M>()
-                )
-            });
-        Self::new(path, source)
-    }
-
     /// The field, as a caller reports it: `name`, `item.name`,
     /// `requests[1].item.name`.
     #[must_use]
@@ -529,35 +508,6 @@ mod tests {
         let error = FieldError::of::<Request>("update_mask", "no such path");
         assert_eq!(error.path().to_string(), "update_mask");
         assert_eq!(*error.failure(), "no such path");
-    }
-
-    /// A request with the fields it is given, as the generated impls name them.
-    struct Fields<const NAME: bool, const PARENT: bool>;
-
-    impl<const NAME: bool, const PARENT: bool> FieldResolver for Fields<NAME, PARENT> {
-        fn field_path(name: &str) -> Option<FieldPath> {
-            match name {
-                "name" if NAME => Some(FieldPath::field("name", 1, FieldType::String)),
-                "parent" if PARENT => Some(FieldPath::field("parent", 1, FieldType::String)),
-                _ => None,
-            }
-        }
-    }
-
-    #[test]
-    fn a_name_failure_is_about_the_name_or_else_the_parent() {
-        let error = FieldError::of_name::<Fields<true, true>>("a wildcard");
-        assert_eq!(error.path().to_string(), "name");
-
-        let error = FieldError::of_name::<Fields<false, true>>("a wildcard");
-        assert_eq!(error.path().to_string(), "parent");
-        assert_eq!(*error.failure(), "a wildcard");
-    }
-
-    #[test]
-    #[should_panic(expected = "neither a name nor a parent")]
-    fn a_name_failure_of_a_request_with_no_name_is_a_bug() {
-        let _ = FieldError::of_name::<Fields<false, false>>("a wildcard");
     }
 
     #[test]

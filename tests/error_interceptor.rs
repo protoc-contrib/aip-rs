@@ -6,7 +6,7 @@
 //! and reads the details back out of it.
 #![cfg(feature = "connect")]
 
-use aip::error::{debug_info, error_info, find_detail, resource_info, status};
+use aip::error::{debug_info, entry_status, error_info, find_detail, resource_info};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use buffa::Message as _;
 use buffa_protos::google::rpc::{DebugInfo, ErrorInfo, RequestInfo};
@@ -239,5 +239,5 @@ fn a_detail_value_is_unpadded_base64() {
         .expect("a DebugInfo");
     assert_eq!(info.detail, "y");
     // And the status of the same error has none.
-    assert!(status(&error).details.is_empty());
+    assert!(entry_status(&error, 0).details.is_empty());
 }

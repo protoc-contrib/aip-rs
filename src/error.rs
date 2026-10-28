@@ -119,7 +119,7 @@ pub fn bad_request<E>(error: &FieldError<E>) -> ErrorDetail {
 /// The `google.rpc.RequestInfo` detail of an error that answers the request
 /// with the id `request_id`: the id the logs carry, for a client to quote.
 #[must_use]
-pub fn request_info(request_id: &str) -> ErrorDetail {
+fn request_info(request_id: &str) -> ErrorDetail {
     ErrorDetail::from_message(
         RequestInfo::FULL_NAME,
         &RequestInfo {
@@ -134,7 +134,7 @@ pub fn request_info(request_id: &str) -> ErrorDetail {
 ///
 /// AIP-193 keeps debugging information out of what a client sees:
 /// [`ErrorInterceptor`] logs it and answers without it, and
-/// [`status`] leaves it out of a failed batch entry.
+/// [`entry_status`] leaves it out of a failed batch entry.
 #[must_use]
 pub fn debug_info(cause: &dyn std::error::Error) -> ErrorDetail {
     ErrorDetail::from_message(
@@ -187,16 +187,10 @@ pub const fn log_level(code: ErrorCode) -> tracing::Level {
 }
 
 /// `error` as the `google.rpc.Status` a `Batch*` response entry carries when its
-/// request failed: the code, numbered as gRPC numbers it, the message, and the
-/// details a unary error would carry -- as `Any` messages, which Connect
-/// carries as base64 text -- less its `google.rpc.DebugInfo` (AIP-193). As
-/// aip-go's `NewStatus`, which also drops the `DebugInfo`, in the interceptor.
-#[must_use]
-pub fn status(error: &ConnectError) -> Status {
-    build_status(error, Some)
-}
-
-/// [`status`] for the entry at `index` of a batch request's `requests`, with
+/// request failed, for the entry at `index` of a batch request's `requests`: the
+/// code, numbered as gRPC numbers it, the message, and the details a unary error
+/// would carry -- as `Any` messages, which Connect carries as base64 text -- less
+/// its `google.rpc.DebugInfo` (AIP-193), with
 /// the fields of its `google.rpc.BadRequest` named under that entry, as
 /// `requests[1].name`: a field path is the request's, and the batch is the
 /// request a client sent. As aip-go's `NewEntryStatus`.
@@ -216,7 +210,7 @@ pub fn entry_status(error: &ConnectError, index: usize) -> Status {
     })
 }
 
-/// What [`status`] and [`entry_status`] share: the status of `error`, each of
+/// What [`entry_status`] builds on: the status of `error`, each of
 /// its details but the `DebugInfo` passed through `map`, which drops the ones it
 /// answers `None` for.
 fn build_status(
@@ -515,11 +509,12 @@ mod tests {
     #[test]
     fn a_status_carries_the_code_the_message_and_every_detail_but_the_debug_info() {
         let cause = std::io::Error::other("connection reset");
-        let status = status(
+        let status = entry_status(
             &ConnectError::not_found("The requested shelf was not found")
                 .with_detail(error_info("example.com", "SHELF_NOT_FOUND"))
                 .with_detail(resource_info(&Shelf))
                 .with_detail(debug_info(&cause)),
+            0,
         );
 
         assert_eq!(status.code, 5);

@@ -69,11 +69,14 @@ pub mod descriptor;
 pub mod error;
 pub mod field_behavior;
 pub mod field_path;
+#[cfg(feature = "connect")]
+pub mod prepare;
 pub mod resource;
 
 #[cfg(feature = "connect")]
 pub use connect::{
-    DynResource, FieldBehaviorInterceptor, Procedure, ResourceWrite, ResourceWrites, WriteMethod,
+    DynResource, FieldBehaviorInterceptor, NewId, Procedure, ResourceWrite, ResourceWrites,
+    WriteMethod, uuid_v7,
 };
 #[cfg(feature = "descriptor")]
 pub use descriptor::FieldDescriptorExt;
@@ -82,6 +85,11 @@ pub use field_behavior::{
     UnknownFieldBehavior,
 };
 pub use field_path::{FieldError, FieldPath, FieldResolver, FieldType, Step};
+#[cfg(feature = "connect")]
+pub use prepare::{
+    PrepareError, PrepareFailure, PrepareInterceptor, Preparer, Reject, RequestPreparer,
+    reject_prepare,
+};
 pub use resource::{Resource, ResourceName, ResourcePattern};
 
 // Not implemented here, deliberately:
