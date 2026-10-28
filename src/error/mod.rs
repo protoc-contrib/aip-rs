@@ -48,7 +48,7 @@ use buffa_protos::google::rpc::{
 use buffa_types::google::protobuf::Any;
 use connectrpc::{ConnectError, ErrorCode, ErrorDetail};
 
-use crate::{FieldError, ResourceName};
+use crate::{FieldError, FieldResolver, ResourceName};
 
 /// The `google.rpc.ErrorInfo` detail of an error (AIP-193): why it happened,
 /// as `reason`, in `domain`, the name of the service that generated it.
@@ -198,6 +198,24 @@ pub const fn log_level(code: ErrorCode) -> tracing::Level {
         }
         _ => tracing::Level::WARN,
     }
+}
+
+/// The [`FieldError`] for `error`, a failure to read an id from the resource
+/// name a request carries, such as a wildcard where an id is needed. The field
+/// is the request's own: its `name`, or its `parent` where it has no `name`
+/// (AIP-131 to AIP-135). As aip-go's `NameRequestError`.
+///
+/// # Panics
+///
+/// If `R` has neither field: a handler naming such a request is a bug.
+#[must_use]
+pub fn name_request_error<R: FieldResolver, E>(error: E) -> FieldError<E> {
+    let field = if R::field_path("name").is_some() {
+        "name"
+    } else {
+        "parent"
+    };
+    FieldError::of::<R>(field, error)
 }
 
 /// `error` as the `google.rpc.Status` a `Batch*` response entry carries when its
@@ -425,5 +443,43 @@ mod tests {
         assert_eq!(request.field_violations[0].field, "requests[2].name");
         // The other details are as they were.
         assert_eq!(status.details.len(), 2);
+    }
+
+    struct GetShelfRequest;
+    struct ListBooksRequest;
+
+    impl FieldResolver for GetShelfRequest {
+        fn field_path(name: &str) -> Option<crate::FieldPath> {
+            (name == "name").then(|| crate::FieldPath::field("name", 1, crate::FieldType::String))
+        }
+    }
+
+    impl FieldResolver for ListBooksRequest {
+        fn field_path(name: &str) -> Option<crate::FieldPath> {
+            (name == "parent")
+                .then(|| crate::FieldPath::field("parent", 1, crate::FieldType::String))
+        }
+    }
+
+    struct NoName;
+
+    impl FieldResolver for NoName {
+        fn field_path(_: &str) -> Option<crate::FieldPath> {
+            None
+        }
+    }
+
+    #[test]
+    fn a_name_request_error_names_the_name_or_else_the_parent() {
+        let named = name_request_error::<GetShelfRequest, _>("the wildcard");
+        assert_eq!(named.path().to_string(), "name");
+        let listed = name_request_error::<ListBooksRequest, _>("the wildcard");
+        assert_eq!(listed.path().to_string(), "parent");
+    }
+
+    #[test]
+    #[should_panic(expected = "not a field")]
+    fn a_name_request_error_for_a_request_with_neither_panics() {
+        let _ = name_request_error::<NoName, _>("the wildcard");
     }
 }

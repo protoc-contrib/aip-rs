@@ -155,7 +155,7 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 | `NewErrorInfo`, `NewResourceInfo`, `NewRetryInfo`, `NewBadRequest`, `NewDebugInfo` | `error::error_info`, `resource_info`, `retry_info`, `bad_request`, `debug_info` | `bad_request` takes a `&FieldError<E>`, where Go panics on an error that is not one |
 | `NewErrorDetail` | `ErrorDetail::from_message` | connectrpc's |
 | none | `ConnectErrorExt::detail::<M>()` | a Rust-only reader: Go reads a detail with `connectproto.UnmarshalErrorDetail` |
-| `NameRequestError` | none | the generated `parse_name` and `parse_parent` name the field, and an id typed as a `Uuid` cannot be the wildcard |
+| `NameRequestError` | `error::name_request_error` | |
 | `NewStatus`, `NewEntryStatus` | `error::entry_status` | for a `ConnectError`: Rust has no other error to convert, and nothing here wants a status without an entry |
 | `ErrorLogLevel` | `error::log_level` | |
 | `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |
