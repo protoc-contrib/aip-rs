@@ -100,8 +100,8 @@ public messages are the service's, and it builds its errors from these parts.
 | | |
 | --- | --- |
 | details | `error_info(domain, reason)`, `resource_info(name)`, `retry_info(delay)`, `bad_request(field_error)` -- with a fixed description, since the error's own text can carry the value --, `debug_info(cause)` and `request_info(id)`; `find_detail::<M>(&error)` reads one back |
-| a batch entry | `error.to_status()` is the `google.rpc.Status` of a failed entry of a `Batch*` response, less its `DebugInfo`; `error.to_entry_status(i)` names the fields of its `BadRequest` under `requests[i]`; `log_entry` logs the entries that were the server's fault |
-| `ErrorInterceptor` | logs each failed unary call once, at ERROR for a fault the request did not cause (`Internal`, `Unknown`, `DataLoss`, `Unavailable`) and WARN for a caller's mistake, with the cause and the stack of its `DebugInfo`, then answers without that `DebugInfo`. `with_default_error_info(domain)` gives an error with no `ErrorInfo` one, its code as the reason; `with_request_id(f)` sends the request's id as a `RequestInfo` |
+| a batch entry | `status(&error)` is the `google.rpc.Status` of a failed entry of a `Batch*` response, less its `DebugInfo`; `entry_status(&error, i)` names the fields of its `BadRequest` under `requests[i]`; `log_entry` logs the entries that were the server's fault |
+| `ErrorInterceptor` | logs each failed unary call once, at ERROR for a fault the request did not cause (`Internal`, `Unknown`, `DataLoss`, `Unavailable`) and WARN for a caller's mistake, with the cause and the stack of its `DebugInfo`, then answers without that `DebugInfo`. `with_default_error_info(domain)` (also a function, for an error that never reaches the interceptor) gives an error with no `ErrorInfo` one, its code as the reason; `with_request_id(f)` sends the request's id as a `RequestInfo` |
 
 A body that does not decode is answered by `FieldBehaviorInterceptor` with a
 fixed message, "The request could not be processed due to malformed data": the
@@ -110,6 +110,34 @@ log.
 
 Register `ErrorInterceptor` first, so what the interceptors after it refuse is
 logged and answered the same way.
+
+## Parity with aip-go
+
+aip-rs keeps aip-go's names and behaviour, in Rust's casing, and departs only
+where the language makes it: the table lists every exported aip-go identifier
+and what stands for it. Anything not in it, in either direction, is a bug.
+
+| aip-go | aip-rs | |
+| --- | --- | --- |
+| `NewErrorInfo`, `NewResourceInfo`, `NewRetryInfo`, `NewBadRequest`, `NewDebugInfo` | `error::error_info`, `resource_info`, `retry_info`, `bad_request`, `debug_info` | `bad_request` takes a `&FieldError<E>`, where Go panics on an error that is not one |
+| `NewErrorDetail` | `ErrorDetail::from_message` | connectrpc's |
+| `NameRequestError` | `error::name_request_error::<M>` | |
+| `NewStatus`, `NewEntryStatus` | `error::status`, `error::entry_status` | for a `ConnectError`: Rust has no other error to convert |
+| `ErrorLogLevel` | `error::log_level` | |
+| `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |
+| `WithErrorLogger` | none | the logs are `tracing` events |
+| the interceptor's `Send` over a batch response | `error::with_default_error_info`, `entry_status` and `log_entry`, called where the entry's status is built | an interceptor has no reflection to find the entries in |
+| `FieldError`, `NewFieldError`, `FieldPath` | `FieldError<E>`, `FieldError::of::<M>`, `FieldPath::of::<M>` | `Err` is `failure()`, `Field()` is the path's `Display` |
+| `FieldBehaviorKind`, `FieldBehaviorSet` (`Has`, `HasAny`, `All`), `FieldBehaviorsOf` | `FieldBehaviorKind`, `FieldBehaviorSet` (`contains`, `intersects`, `iter`), `FieldDescriptorExt` | |
+| `ClearFields`, `ValidateFields`, `FieldBehaviorError` | `FieldBehavior::clear_fields`, `validate_fields`, `FieldBehaviorError` | generated, as there is no reflection |
+| `ImpliedFieldMask`, `ClearFieldMask` | `Resource::implied_field_mask`, `clear_field_mask` | |
+| `NewFieldBehaviorInterceptor` | `FieldBehaviorInterceptor::new(PROCEDURES)` | the table stands for reflection |
+| `ResourceWrites`, `ResourceWrite`, `ResourceCreate`, `ResourceUpdate` | `ResourceWrites::for_each_write`, `ResourceWrite`, `WriteMethod::{Create, Update}` | an enum where Go has two optional pointers |
+| `ResourceWildcard`, `ValidateResourceID`, `ContainsWildcard` | `resource::WILDCARD`, `validate_resource_id`, `contains_wildcard` | |
+| `ResourcePattern` and its methods | `ResourcePattern`: `compile`, `as_str`, `variables`, `variable_names`, `scan`, `scan_full`, `invalid_value`, `invalid_id`, `format`, `validate` | `MustCompileResourcePattern` is `.parse().expect(..)` |
+| `ResourceName` | `ResourceName` | `Type` is `resource_type`, `type` being a keyword |
+| `ParseError`, `ErrInvalidResourceName` | `ParseError` with `kind()`, `pattern()` and `name()` | `errors.Is` is the type |
+| `RequestPreparer`, `NewPrepareInterceptor` | not yet | the template's, until it moves here |
 
 ## Scope: what is deliberately not here
 

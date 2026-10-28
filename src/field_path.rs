@@ -244,6 +244,18 @@ impl<E> FieldError<E> {
         }
     }
 
+    /// The failure `source` of the field `name` of the message `M`, as
+    /// [`FieldPath::of`] takes it: how a caller names a request field it wrote
+    /// out, in one call. As aip-go's `NewFieldError`.
+    ///
+    /// # Panics
+    ///
+    /// As [`FieldPath::of`], if `name` is not a field of `M`.
+    #[must_use]
+    pub fn of<M: FieldResolver>(name: &str, source: E) -> Self {
+        Self::new(FieldPath::of::<M>(name), source)
+    }
+
     /// The field, as a caller reports it: `name`, `item.name`,
     /// `requests[1].item.name`.
     #[must_use]
@@ -481,6 +493,21 @@ mod tests {
         let error = FieldError::new(name(), Refused);
         assert_eq!(error.clone(), error);
         assert_ne!(error, FieldError::new(item(), Refused));
+    }
+
+    #[test]
+    fn a_field_error_is_made_of_a_field_name_in_one_call() {
+        struct Request;
+        impl FieldResolver for Request {
+            fn field_path(name: &str) -> Option<FieldPath> {
+                (name == "update_mask")
+                    .then(|| FieldPath::field("update_mask", 2, FieldType::Message))
+            }
+        }
+
+        let error = FieldError::of::<Request>("update_mask", "no such path");
+        assert_eq!(error.path().to_string(), "update_mask");
+        assert_eq!(*error.failure(), "no such path");
     }
 
     #[test]
