@@ -6,7 +6,7 @@
 //! and reads the details back out of it.
 #![cfg(feature = "connect")]
 
-use aip::error::{debug_info, entry_status, error_info, find_detail, resource_info};
+use aip::error::{ConnectErrorExt as _, debug_info, entry_status, error_info, resource_info};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use buffa::Message as _;
 use buffa_protos::google::rpc::{DebugInfo, ErrorInfo, RequestInfo};
@@ -113,7 +113,7 @@ async fn an_error_that_has_an_error_info_keeps_it() {
 
     let (_, error) = call(&service, FAIL).await;
 
-    let info = find_detail::<ErrorInfo>(&error).expect("an ErrorInfo");
+    let info = error.detail::<ErrorInfo>().expect("an ErrorInfo");
     assert_eq!(info.reason, "SHELF_NOT_FOUND");
     assert_eq!(info.domain, "example.com");
     assert_eq!(details(&error), ["google.rpc.ErrorInfo"]);
@@ -128,7 +128,7 @@ async fn an_error_that_has_none_gets_its_code_as_the_reason() {
 
     let (_, error) = call(&service, FAIL).await;
 
-    let info = find_detail::<ErrorInfo>(&error).expect("an ErrorInfo");
+    let info = error.detail::<ErrorInfo>().expect("an ErrorInfo");
     assert_eq!(info.reason, "INVALID_ARGUMENT");
     assert_eq!(info.domain, "example.com");
 }
@@ -158,7 +158,7 @@ async fn the_request_id_is_sent_as_a_request_info() {
 
     let (_, error) = call(&service, FAIL).await;
 
-    let info = find_detail::<RequestInfo>(&error).expect("a RequestInfo");
+    let info = error.detail::<RequestInfo>().expect("a RequestInfo");
     assert_eq!(info.request_id, "request-1");
     // After what the handler built, which the interceptor does not reorder.
     assert_eq!(

@@ -230,6 +230,7 @@ mod tests {
     use tower::ServiceExt as _;
 
     use super::*;
+    use crate::error::ConnectErrorExt as _;
 
     /// A request that upper-cases its paths, and refuses one that is empty.
     impl RequestPreparer for FieldMask {
@@ -298,7 +299,8 @@ mod tests {
             return Ok(FieldMask::decode_from_slice(&body).expect("a mask").paths);
         }
         let error: ConnectError = serde_json::from_slice(&body).expect("an error");
-        let field = crate::error::find_detail::<buffa_protos::google::rpc::BadRequest>(&error)
+        let field = error
+            .detail::<buffa_protos::google::rpc::BadRequest>()
             .and_then(|request| request.field_violations.first().map(|v| v.field.clone()))
             .unwrap_or_default();
         Err((error.message.unwrap_or_default(), field))

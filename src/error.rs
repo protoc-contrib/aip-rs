@@ -151,16 +151,29 @@ pub fn debug_info(cause: &dyn std::error::Error) -> ErrorDetail {
     )
 }
 
-/// The `M` detail `error` carries, if it carries one: how a client reads
-/// [`error_info`] and the others back, and how [`ErrorInterceptor`] reads the
-/// [`debug_info`] it logs.
-#[must_use]
-pub fn find_detail<M: buffa::Message + MessageName>(error: &ConnectError) -> Option<M> {
-    let detail = error
-        .details
-        .iter()
-        .find(|detail| detail.type_url == M::FULL_NAME)?;
-    M::decode_from_slice(&decode_value(detail)?).ok()
+/// Reading a detail back from a [`ConnectError`]: a trait because the type is the
+/// `connectrpc` crate's, and what lets a caller write
+/// `error.detail::<ErrorInfo>()`.
+pub trait ConnectErrorExt {
+    /// The `M` detail the error carries, if it carries one: how a client reads
+    /// [`error_info`] and the others back, and how [`ErrorInterceptor`] reads the
+    /// [`debug_info`] it logs.
+    ///
+    /// The first of that type, since AIP-193 sends each at most once. A detail
+    /// that is there and does not decode is no different from one that is not:
+    /// `None`.
+    #[must_use]
+    fn detail<M: buffa::Message + MessageName>(&self) -> Option<M>;
+}
+
+impl ConnectErrorExt for ConnectError {
+    fn detail<M: buffa::Message + MessageName>(&self) -> Option<M> {
+        let detail = self
+            .details
+            .iter()
+            .find(|detail| detail.type_url == M::FULL_NAME)?;
+        M::decode_from_slice(&decode_value(detail)?).ok()
+    }
 }
 
 /// A detail's bytes. The Connect protocol sends them unpadded, and a padded
@@ -244,7 +257,8 @@ fn causes(error: &ConnectError) -> (String, String) {
     let source = std::error::Error::source(error)
         .map(ToString::to_string)
         .unwrap_or_default();
-    let stack = find_detail::<DebugInfo>(error)
+    let stack = error
+        .detail::<DebugInfo>()
         .map(|info| info.stack_entries.join("\n"))
         .unwrap_or_default();
     (source, stack)
@@ -422,7 +436,7 @@ mod tests {
         let error =
             ConnectError::not_found("x").with_detail(error_info("example.com", "SHELF_NOT_FOUND"));
 
-        let info = find_detail::<ErrorInfo>(&error).expect("an ErrorInfo");
+        let info = error.detail::<ErrorInfo>().expect("an ErrorInfo");
         assert_eq!(info.reason, "SHELF_NOT_FOUND");
         assert_eq!(info.domain, "example.com");
     }
@@ -431,7 +445,7 @@ mod tests {
     fn resource_info_names_the_type_and_the_name() {
         let error = ConnectError::not_found("x").with_detail(resource_info(&Shelf));
 
-        let info = find_detail::<ResourceInfo>(&error).expect("a ResourceInfo");
+        let info = error.detail::<ResourceInfo>().expect("a ResourceInfo");
         assert_eq!(info.resource_type, "example.com/Shelf");
         assert_eq!(info.resource_name, "shelves/s1");
     }
@@ -441,7 +455,8 @@ mod tests {
         let error =
             ConnectError::unavailable("x").with_detail(retry_info(Duration::from_millis(1500)));
 
-        let delay = find_detail::<RetryInfo>(&error)
+        let delay = error
+            .detail::<RetryInfo>()
             .and_then(|info| info.retry_delay.as_option().cloned())
             .expect("a delay");
         assert_eq!((delay.seconds, delay.nanos), (1, 500_000_000));
@@ -457,7 +472,7 @@ mod tests {
         );
         let error = ConnectError::invalid_argument("x").with_detail(bad_request(&secret));
 
-        let request = find_detail::<BadRequest>(&error).expect("a BadRequest");
+        let request = error.detail::<BadRequest>().expect("a BadRequest");
         let [violation] = request.field_violations.as_slice() else {
             panic!("one violation: {request:?}");
         };
@@ -470,7 +485,7 @@ mod tests {
         let cause = std::io::Error::other("connection reset");
         let error = ConnectError::internal("x").with_detail(debug_info(&cause));
 
-        let info = find_detail::<DebugInfo>(&error).expect("a DebugInfo");
+        let info = error.detail::<DebugInfo>().expect("a DebugInfo");
         assert_eq!(info.detail, "connection reset");
         assert!(!info.stack_entries.is_empty());
     }

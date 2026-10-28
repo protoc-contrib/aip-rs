@@ -110,7 +110,7 @@ public messages are the service's, and it builds its errors from these parts.
 
 | | |
 | --- | --- |
-| details | `error_info(domain, reason)`, `resource_info(name)`, `retry_info(delay)`, `bad_request(field_error)` -- with a fixed description, since the error's own text can carry the value --, `debug_info(cause)` and `request_info(id)`; `find_detail::<M>(&error)` reads one back |
+| details | `error_info(domain, reason)`, `resource_info(name)`, `retry_info(delay)`, `bad_request(field_error)` -- with a fixed description, since the error's own text can carry the value --, `debug_info(cause)` and `request_info(id)`; `error.detail::<M>()` (the one-method `ConnectErrorExt`) reads one back |
 | a batch entry | `entry_status(&error, i)` is the `google.rpc.Status` of a failed entry of a `Batch*` response, less its `DebugInfo`, with the fields of its `BadRequest` named under `requests[i]` |
 | `ErrorInterceptor` | logs each failed unary call once, at ERROR for a fault the request did not cause (`Internal`, `Unknown`, `DataLoss`, `Unavailable`) and WARN for a caller's mistake, with the cause and the stack of its `DebugInfo`, then answers without that `DebugInfo`. `with_default_error_info(domain)` gives an error with no `ErrorInfo` one, its code as the reason; `with_request_id(f)` sends the request's id as a `RequestInfo` |
 
@@ -132,6 +132,7 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 | --- | --- | --- |
 | `NewErrorInfo`, `NewResourceInfo`, `NewRetryInfo`, `NewBadRequest`, `NewDebugInfo` | `error::error_info`, `resource_info`, `retry_info`, `bad_request`, `debug_info` | `bad_request` takes a `&FieldError<E>`, where Go panics on an error that is not one |
 | `NewErrorDetail` | `ErrorDetail::from_message` | connectrpc's |
+| none | `ConnectErrorExt::detail::<M>()` | a Rust-only reader: Go reads a detail with `connectproto.UnmarshalErrorDetail` |
 | `NameRequestError` | none | the generated `parse_name` and `parse_parent` name the field, and an id typed as a `Uuid` cannot be the wildcard |
 | `NewStatus`, `NewEntryStatus` | `error::entry_status` | for a `ConnectError`: Rust has no other error to convert, and nothing here wants a status without an entry |
 | `ErrorLogLevel` | `error::log_level` | |
