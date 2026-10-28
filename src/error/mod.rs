@@ -1,7 +1,7 @@
 //! AIP-193 errors on a Connect server: the details an error carries, and the
 //! `google.rpc.Status` of a failed batch entry. What logs a failed call, and
 //! answers the client without what is only for the log, is the
-//! [`ErrorInterceptor`](crate::error_interceptor::ErrorInterceptor).
+//! [`ErrorInterceptor`].
 //!
 //! The Rust counterpart of aip-go's `errors.go`.
 //! Nothing here knows a service: the domain of an `ErrorInfo`, the reasons and
@@ -23,7 +23,7 @@
 //! # What the client sees
 //!
 //! A handler builds an error with every detail it knows, `DebugInfo` included,
-//! and returns it. The [`ErrorInterceptor`](crate::error_interceptor::ErrorInterceptor) is where that is told from what a
+//! and returns it. The [`ErrorInterceptor`] is where that is told from what a
 //! client may have: it logs the error with its cause and where it happened,
 //! then answers without the `DebugInfo` -- AIP-193 keeps debugging information
 //! out of a response -- and with the request's id as a `RequestInfo`, which a
@@ -32,6 +32,10 @@
 //! builds it the same way. Nothing wraps the response to find such an entry,
 //! as aip-go's interceptor does, so whatever builds one logs it, as
 //! [`log_level`] says it should be.
+
+pub mod interceptor;
+
+pub use interceptor::ErrorInterceptor;
 
 use std::{backtrace::Backtrace, time::Duration};
 
@@ -130,7 +134,7 @@ pub(crate) fn request_info(request_id: &str) -> ErrorDetail {
 /// and the stack where the detail was built.
 ///
 /// AIP-193 keeps debugging information out of what a client sees:
-/// [`ErrorInterceptor`](crate::error_interceptor::ErrorInterceptor) logs it and answers without it, and
+/// [`ErrorInterceptor`] logs it and answers without it, and
 /// [`entry_status`] leaves it out of a failed batch entry.
 #[must_use]
 pub fn debug_info(cause: &dyn std::error::Error) -> ErrorDetail {
@@ -153,7 +157,7 @@ pub fn debug_info(cause: &dyn std::error::Error) -> ErrorDetail {
 /// `error.detail::<ErrorInfo>()`.
 pub trait ConnectErrorExt {
     /// The `M` detail the error carries, if it carries one: how a client reads
-    /// [`error_info`] and the others back, and how [`ErrorInterceptor`](crate::error_interceptor::ErrorInterceptor) reads the
+    /// [`error_info`] and the others back, and how [`ErrorInterceptor`] reads the
     /// [`debug_info`] it logs.
     ///
     /// The first of that type, since AIP-193 sends each at most once. A detail

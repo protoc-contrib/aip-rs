@@ -4,7 +4,7 @@
 
 use core::fmt;
 
-use crate::field_path::{FieldPath, FieldResolver};
+use super::path::{FieldPath, FieldResolver};
 
 /// Why the value of a request field is invalid, and which field it was: what
 /// a generated `parse` method on a request or a resource returns, so a caller

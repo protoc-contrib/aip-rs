@@ -46,6 +46,28 @@ aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", ta
 | [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
 | [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158) | `order_by`, page tokens | the query layer — see below | — |
 
+## Layout
+
+One module per AIP concept, everything re-exported at the crate root:
+
+```
+src/
+├── lib.rs
+├── resource.rs            names (AIP-122, 159)
+├── field/                 request fields
+│   ├── path.rs            FieldPath, FieldResolver
+│   ├── error.rs           FieldError
+│   ├── behavior.rs        field behavior (AIP-203)
+│   └── descriptor.rs      feature `descriptor`
+├── error/                 errors a client sees (AIP-193, 194)
+│   ├── mod.rs             details, entry_status, log_level
+│   └── interceptor.rs     ErrorInterceptor
+└── request/               what a server does with a request (AIP-133, 134, 233, 234)
+    ├── writes.rs          ResourceWrites
+    ├── behavior.rs        FieldBehaviorInterceptor, Procedure
+    └── prepare.rs         RequestPreparer, PrepareInterceptor
+```
+
 ## The interceptor
 
 `FieldBehaviorInterceptor` applies AIP field behavior on a Connect server, with
@@ -72,7 +94,7 @@ the messages it passes on, the outbound ones included, and leaves a client's
 calls alone. Every message buffa and protoc-gen-rust-aip generate qualifies,
 the well-known types included (aip-rs gives them empty `FieldBehavior`
 impls), so a method taking `google.protobuf.Empty` needs nothing special.
-`aip::connect::validate::<M>` applies the inbound steps to a payload holding an
+`aip::request::behavior::validate::<M>` applies the inbound steps to a payload holding an
 `M`, exactly as the interceptor does, for a caller such as a handler test.
 
 **Names are the server's.** AIP-133 has the server build a created resource's
@@ -84,7 +106,7 @@ name storage holds. A service with another id scheme fills the id in with its
 own interceptor ahead of this one, through `ResourceWrites::for_each_write`:
 an id that is already set is kept.
 
-The public surface of `aip::connect` is that and no more:
+The public surface of `aip::request` is that and no more:
 `FieldBehaviorInterceptor`, `Procedure` (`path`, `inbound`, `outbound`;
 `Procedure::new`, `Procedure::clear` for a well-known request type),
 `ResourceWrites`, `ResourceWrite`,
@@ -136,7 +158,7 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 | `NameRequestError` | none | the generated `parse_name` and `parse_parent` name the field, and an id typed as a `Uuid` cannot be the wildcard |
 | `NewStatus`, `NewEntryStatus` | `error::entry_status` | for a `ConnectError`: Rust has no other error to convert, and nothing here wants a status without an entry |
 | `ErrorLogLevel` | `error::log_level` | |
-| `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error_interceptor::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |
+| `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |
 | `WithErrorLogger` | none | the logs are `tracing` events |
 | the interceptor's `Send` over a batch response | `error::entry_status` and `log_level`, called where the entry's status is built | an interceptor has no reflection to find the entries in, so the caller logs them |
 | `FieldError`, `NewFieldError`, `FieldPath` | `FieldError<E>`, `FieldError::of::<M>`, `FieldPath::of::<M>` | `Err` is `failure()`, `Field()` is the path's `Display` |

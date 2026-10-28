@@ -38,7 +38,7 @@
 //!   a [`FieldBehaviorError`] with a [`FieldPath`] per field
 //! - AIP-193 errors -- with the `connect` feature, the [`error`] module builds
 //!   the details an error carries, the `google.rpc.Status` of a failed batch
-//!   entry, and [`ErrorInterceptor`](error_interceptor::ErrorInterceptor), which logs a
+//!   entry, and [`ErrorInterceptor`](error::ErrorInterceptor), which logs a
 //!   failed call and answers it without its `DebugInfo`
 //! - [`FieldBehaviorSet`] -- a set of kinds, e.g. what one field is annotated
 //!   with; with the `descriptor` feature, `FieldDescriptorExt::field_behaviors`
@@ -62,36 +62,30 @@
 #![deny(missing_docs)]
 
 #[cfg(feature = "connect")]
-pub mod connect;
-#[cfg(feature = "descriptor")]
-pub mod descriptor;
-#[cfg(feature = "connect")]
 pub mod error;
+pub mod field;
 #[cfg(feature = "connect")]
-pub mod error_interceptor;
-pub mod field_behavior;
-pub mod field_error;
-pub mod field_path;
-#[cfg(feature = "connect")]
-pub mod prepare;
+pub mod request;
 pub mod resource;
 
-#[cfg(feature = "connect")]
-pub use connect::{
-    DynResource, FieldBehaviorInterceptor, Procedure, ResourceWrite, ResourceWrites, WriteMethod,
-};
 #[cfg(feature = "descriptor")]
-pub use descriptor::FieldDescriptorExt;
-pub use field_behavior::{
-    FieldBehavior, FieldBehaviorError, FieldBehaviorKind, FieldBehaviorSet, FieldScope,
-    UnknownFieldBehavior,
+pub use field::descriptor::FieldDescriptorExt;
+pub use field::{
+    behavior::{
+        FieldBehavior, FieldBehaviorError, FieldBehaviorKind, FieldBehaviorSet, FieldScope,
+        UnknownFieldBehavior,
+    },
+    error::FieldError,
+    path::{FieldPath, FieldResolver, FieldType, Step},
 };
-pub use field_error::FieldError;
-pub use field_path::{FieldPath, FieldResolver, FieldType, Step};
 #[cfg(feature = "connect")]
-pub use prepare::{
-    PrepareError, PrepareFailure, PrepareInterceptor, Preparer, Reject, RequestPreparer,
-    reject_prepare,
+pub use request::{
+    behavior::{FieldBehaviorInterceptor, Procedure},
+    prepare::{
+        PrepareError, PrepareFailure, PrepareInterceptor, Preparer, Reject, RequestPreparer,
+        reject_prepare,
+    },
+    writes::{DynResource, ResourceWrite, ResourceWrites, WriteMethod},
 };
 pub use resource::{Resource, ResourceName, ResourcePattern};
 
@@ -123,8 +117,8 @@ mod tests {
     use connectrpc::{ConnectRpcService, Router};
 
     use crate::{
-        FieldBehaviorInterceptor, PrepareInterceptor, Preparer, Procedure,
-        error_interceptor::ErrorInterceptor, reject_prepare,
+        FieldBehaviorInterceptor, PrepareInterceptor, Preparer, Procedure, error::ErrorInterceptor,
+        reject_prepare,
     };
 
     static PROCEDURES: &[Procedure] = &[];
