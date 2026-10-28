@@ -46,6 +46,28 @@ aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", ta
 | [160](https://google.aip.dev/160) | `filter` environment and syntax check | **generated** (CEL) | — |
 | [132](https://google.aip.dev/132#ordering), [158](https://google.aip.dev/158) | `order_by`, page tokens | the query layer — see below | — |
 
+## Layout
+
+One module per AIP concept, everything re-exported at the crate root:
+
+```
+src/
+├── lib.rs
+├── resource.rs            names (AIP-122, 159)
+├── field/                 request fields
+│   ├── path.rs            FieldPath, FieldResolver
+│   ├── error.rs           FieldError
+│   ├── behavior.rs        field behavior (AIP-203)
+│   └── descriptor.rs      feature `descriptor`
+├── error/                 errors a client sees (AIP-193, 194)
+│   ├── mod.rs             details, entry_status, log_level
+│   └── interceptor.rs     ErrorInterceptor
+└── request/               what a server does with a request (AIP-133, 134, 233, 234)
+    ├── writes.rs          ResourceWrites
+    ├── behavior.rs        FieldBehaviorInterceptor, Procedure
+    └── prepare.rs         RequestPreparer, PrepareInterceptor
+```
+
 ## The interceptor
 
 `FieldBehaviorInterceptor` applies AIP field behavior on a Connect server, with
@@ -72,7 +94,7 @@ the messages it passes on, the outbound ones included, and leaves a client's
 calls alone. Every message buffa and protoc-gen-rust-aip generate qualifies,
 the well-known types included (aip-rs gives them empty `FieldBehavior`
 impls), so a method taking `google.protobuf.Empty` needs nothing special.
-`aip::connect::validate::<M>` applies the inbound steps to a payload holding an
+`aip::request::behavior::validate::<M>` applies the inbound steps to a payload holding an
 `M`, exactly as the interceptor does, for a caller such as a handler test.
 
 **Names are the server's.** AIP-133 has the server build a created resource's
@@ -84,11 +106,72 @@ name storage holds. A service with another id scheme fills the id in with its
 own interceptor ahead of this one, through `ResourceWrites::for_each_write`:
 an id that is already set is kept.
 
-The public surface of `aip::connect` is that and no more:
+The public surface of `aip::request` is that and no more:
 `FieldBehaviorInterceptor`, `Procedure` (`path`, `inbound`, `outbound`;
 `Procedure::new`, `Procedure::clear` for a well-known request type),
 `ResourceWrites`, `ResourceWrite`,
 `WriteMethod`, `DynResource` (every `Resource` is one) and `validate`.
+
+## Preparing a request
+
+`RequestPreparer` is a request that readies itself for its handler, and
+`PrepareInterceptor` calls it, after `FieldBehaviorInterceptor`: where a service
+does what AIP leaves to the server and no library decides for it, such as
+building a create's name from its `parent` and id (AIP-133) or filling a List
+call's `page_size` (AIP-158). Like the field behavior interceptor it is handed a
+table, `Preparer::new::<Request>(path)` per procedure; a request it refuses is
+`InvalidArgument` with the field it names as a `BadRequest`, or what
+`with_reject` answers.
+
+## The error model
+
+`aip::error` (the `connect` feature) is the AIP-193 error model of a Connect
+server, the Rust counterpart of aip-go's `errors.go` and `error_interceptor.go`.
+Nothing in it knows a service: the domain of an `ErrorInfo`, its reasons and the
+public messages are the service's, and it builds its errors from these parts.
+
+| | |
+| --- | --- |
+| details | `error_info(domain, reason)`, `resource_info(name)`, `retry_info(delay)`, `bad_request(field_error)` -- with a fixed description, since the error's own text can carry the value --, `debug_info(cause)` and `request_info(id)`; `error.detail::<M>()` (the one-method `ConnectErrorExt`) reads one back |
+| a batch entry | `entry_status(&error, i)` is the `google.rpc.Status` of a failed entry of a `Batch*` response, less its `DebugInfo`, with the fields of its `BadRequest` named under `requests[i]` |
+| `ErrorInterceptor` | logs each failed unary call once, at ERROR for a fault the request did not cause (`Internal`, `Unknown`, `DataLoss`, `Unavailable`) and WARN for a caller's mistake, with the cause and the stack of its `DebugInfo`, then answers without that `DebugInfo`. `with_default_error_info(domain)` gives an error with no `ErrorInfo` one, its code as the reason; `with_request_id(f)` sends the request's id as a `RequestInfo` |
+
+A body that does not decode is answered by `FieldBehaviorInterceptor` with a
+fixed message, "The request could not be processed due to malformed data": the
+decoder's text can quote the value, so it is kept as the error's source, for the
+log.
+
+Register `ErrorInterceptor` first, so what the interceptors after it refuse is
+logged and answered the same way.
+
+## Parity with aip-go
+
+aip-rs keeps aip-go's names and behaviour, in Rust's casing, and departs only
+where the language makes it: the table lists every exported aip-go identifier
+and what stands for it. Anything not in it, in either direction, is a bug.
+
+| aip-go | aip-rs | |
+| --- | --- | --- |
+| `NewErrorInfo`, `NewResourceInfo`, `NewRetryInfo`, `NewBadRequest`, `NewDebugInfo` | `error::error_info`, `resource_info`, `retry_info`, `bad_request`, `debug_info` | `bad_request` takes a `&FieldError<E>`, where Go panics on an error that is not one |
+| `NewErrorDetail` | `ErrorDetail::from_message` | connectrpc's |
+| none | `ConnectErrorExt::detail::<M>()` | a Rust-only reader: Go reads a detail with `connectproto.UnmarshalErrorDetail` |
+| `NameRequestError` | none | the generated `parse_name` and `parse_parent` name the field, and an id typed as a `Uuid` cannot be the wildcard |
+| `NewStatus`, `NewEntryStatus` | `error::entry_status` | for a `ConnectError`: Rust has no other error to convert, and nothing here wants a status without an entry |
+| `ErrorLogLevel` | `error::log_level` | |
+| `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |
+| `WithErrorLogger` | none | the logs are `tracing` events |
+| the interceptor's `Send` over a batch response | `error::entry_status` and `log_level`, called where the entry's status is built | an interceptor has no reflection to find the entries in, so the caller logs them |
+| `FieldError`, `NewFieldError`, `FieldPath` | `FieldError<E>`, `FieldError::of::<M>`, `FieldPath::of::<M>` | `Err` is `failure()`, `Field()` is the path's `Display` |
+| `FieldBehaviorKind`, `FieldBehaviorSet` (`Has`, `HasAny`, `All`), `FieldBehaviorsOf` | `FieldBehaviorKind`, `FieldBehaviorSet` (`contains`, `intersects`, `iter`), `FieldDescriptorExt` | |
+| `ClearFields`, `ValidateFields`, `FieldBehaviorError` | `FieldBehavior::clear_fields`, `validate_fields`, `FieldBehaviorError` | generated, as there is no reflection |
+| `ImpliedFieldMask`, `ClearFieldMask` | `Resource::implied_field_mask`, `clear_field_mask` | |
+| `NewFieldBehaviorInterceptor` | `FieldBehaviorInterceptor::new(PROCEDURES)` | the table stands for reflection |
+| `ResourceWrites`, `ResourceWrite`, `ResourceCreate`, `ResourceUpdate` | `ResourceWrites::for_each_write`, `ResourceWrite`, `WriteMethod::{Create, Update}` | an enum where Go has two optional pointers |
+| `ResourceWildcard`, `ValidateResourceID`, `ContainsWildcard` | `resource::WILDCARD`, `validate_resource_id`, `contains_wildcard` | |
+| `ResourcePattern` and its methods | `ResourcePattern`: `compile`, `as_str`, `variables`, `variable_names`, `scan`, `scan_full`, `invalid_value`, `invalid_id`, `format`, `validate` | `MustCompileResourcePattern` is `.parse().expect(..)` |
+| `ResourceName` | `ResourceName` | `Type` is `resource_type`, `type` being a keyword |
+| `ParseError`, `ErrInvalidResourceName` | `ParseError` with `kind()`, `pattern()` and `name()` | `errors.Is` is the type |
+| `RequestPreparer`, `NewPrepareInterceptor(reject)` | `RequestPreparer`, `PrepareInterceptor::new(PREPARERS).with_reject(..)` | a table of `Preparer`s stands for reflection; a request's failure is a `FieldError<PrepareFailure>`, so it always names a field |
 
 ## Scope: what is deliberately not here
 

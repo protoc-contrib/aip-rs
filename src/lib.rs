@@ -36,6 +36,10 @@
 //! - AIP-203 field behavior -- [`FieldBehavior`], which clears and validates
 //!   the fields of a [`FieldBehaviorKind`], within a [`FieldScope`], reporting
 //!   a [`FieldBehaviorError`] with a [`FieldPath`] per field
+//! - AIP-193 errors -- with the `connect` feature, the [`error`] module builds
+//!   the details an error carries, the `google.rpc.Status` of a failed batch
+//!   entry, and [`ErrorInterceptor`](error::ErrorInterceptor), which logs a
+//!   failed call and answers it without its `DebugInfo`
 //! - [`FieldBehaviorSet`] -- a set of kinds, e.g. what one field is annotated
 //!   with; with the `descriptor` feature, `FieldDescriptorExt::field_behaviors`
 //!   reads it off a buffa-descriptor `FieldDescriptor`
@@ -58,24 +62,31 @@
 #![deny(missing_docs)]
 
 #[cfg(feature = "connect")]
-pub mod connect;
-#[cfg(feature = "descriptor")]
-pub mod descriptor;
-pub mod field_behavior;
-pub mod field_path;
+pub mod error;
+pub mod field;
+#[cfg(feature = "connect")]
+pub mod request;
 pub mod resource;
 
-#[cfg(feature = "connect")]
-pub use connect::{
-    DynResource, FieldBehaviorInterceptor, Procedure, ResourceWrite, ResourceWrites, WriteMethod,
-};
 #[cfg(feature = "descriptor")]
-pub use descriptor::FieldDescriptorExt;
-pub use field_behavior::{
-    FieldBehavior, FieldBehaviorError, FieldBehaviorKind, FieldBehaviorSet, FieldScope,
-    UnknownFieldBehavior,
+pub use field::descriptor::FieldDescriptorExt;
+pub use field::{
+    behavior::{
+        FieldBehavior, FieldBehaviorError, FieldBehaviorKind, FieldBehaviorSet, FieldScope,
+        UnknownFieldBehavior,
+    },
+    error::FieldError,
+    path::{FieldPath, FieldResolver, FieldType, Step},
 };
-pub use field_path::{FieldError, FieldPath, FieldResolver, FieldType, Step};
+#[cfg(feature = "connect")]
+pub use request::{
+    behavior::{FieldBehaviorInterceptor, Procedure},
+    prepare::{
+        PrepareError, PrepareFailure, PrepareInterceptor, Preparer, Reject, RequestPreparer,
+        reject_prepare,
+    },
+    writes::{DynResource, ResourceWrite, ResourceWrites, WriteMethod},
+};
 pub use resource::{Resource, ResourceName, ResourcePattern};
 
 // Not implemented here, deliberately:
@@ -100,3 +111,29 @@ pub use resource::{Resource, ResourceName, ResourcePattern};
 //
 // Revisit if a buffa release lands `reflect_mut`: field behavior could then
 // move here behind a `buffa` feature, as aip-go does with protoreflect.
+
+#[cfg(all(test, feature = "connect"))]
+mod tests {
+    use connectrpc::{ConnectRpcService, Router};
+
+    use crate::{
+        FieldBehaviorInterceptor, PrepareInterceptor, Preparer, Procedure, error::ErrorInterceptor,
+        reject_prepare,
+    };
+
+    static PROCEDURES: &[Procedure] = &[];
+    static PREPARERS: &[Preparer] = &[];
+
+    /// Every interceptor a service registers, built as a service builds it.
+    #[test]
+    fn every_interceptor_registers_on_a_service() {
+        let _service = ConnectRpcService::new(Router::new())
+            .with_interceptor(
+                ErrorInterceptor::new()
+                    .with_default_error_info("example.com")
+                    .with_request_id(|_| None),
+            )
+            .with_interceptor(FieldBehaviorInterceptor::new(PROCEDURES))
+            .with_interceptor(PrepareInterceptor::new(PREPARERS).with_reject(reject_prepare));
+    }
+}
