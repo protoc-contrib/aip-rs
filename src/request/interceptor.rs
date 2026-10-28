@@ -835,7 +835,7 @@ mod interceptor_tests {
     //! [`FieldBehaviorInterceptor`] on the path a request takes through a
     //! connectrpc server -- HTTP in, the router, the interceptor chain, the
     //! handler, and back -- as aip-go's `interceptor_test.go` drives its own,
-    //! rather than through [`crate::request::behavior::validate`] alone.
+    //! rather than through [`crate::request::interceptor::validate`] alone.
     //!
     //! The messages are hand-written `buffa::Message`s, so the crate needs no
     //! codegen to test itself: a `Book` resource and the requests that write it,
