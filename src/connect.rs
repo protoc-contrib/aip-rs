@@ -222,10 +222,6 @@ where
     clear::<M>(payload, FieldBehaviorKind::InputOnly)
 }
 
-/// What a body that does not decode is answered with: connectrpc's own text
-/// carries the decoder's, which for JSON quotes the value that did not parse.
-const MALFORMED_MESSAGE: &str = "The request could not be processed due to malformed data";
-
 /// `payload` read as an `M`. A body that does not decode is answered with a
 /// fixed message, the decoder's text kept as the error's source for the log, as
 /// aip-go does: the first read of a request is the one that fails, and it is
@@ -237,7 +233,12 @@ where
 {
     payload.message::<M>().map_err(|error| {
         if error.code == ErrorCode::InvalidArgument {
-            ConnectError::invalid_argument(MALFORMED_MESSAGE).with_source(error)
+            // Fixed, since connectrpc's own text carries the decoder's, which for
+            // JSON quotes the value that did not parse.
+            ConnectError::invalid_argument(
+                "The request could not be processed due to malformed data",
+            )
+            .with_source(error)
         } else {
             error
         }
