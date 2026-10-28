@@ -102,18 +102,11 @@ pub fn retry_info(delay: Duration) -> ErrorDetail {
 /// value.
 #[must_use]
 pub fn bad_request<E>(error: &FieldError<E>) -> ErrorDetail {
-    bad_request_field(&error.path().to_string())
-}
-
-/// [`bad_request`] for a field that is only a path, as `requests[1].item_id`:
-/// what an error that was not built from a [`FieldError`] has to name it by.
-#[must_use]
-pub fn bad_request_field(field: &str) -> ErrorDetail {
     ErrorDetail::from_message(
         BadRequest::FULL_NAME,
         &BadRequest {
             field_violations: vec![FieldViolation {
-                field: field.to_owned(),
+                field: error.path().to_string(),
                 description: "value is invalid".to_owned(),
                 ..FieldViolation::default()
             }],

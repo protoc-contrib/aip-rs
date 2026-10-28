@@ -251,6 +251,19 @@ impl<E> FieldError<E> {
         &self.inner.path
     }
 
+    /// Why the value is invalid: the failure the error was made of.
+    #[must_use]
+    pub fn failure(&self) -> &E {
+        &self.inner.source
+    }
+
+    /// The failure the error was made of, without the field: how a caller
+    /// gives the same failure another field to be about.
+    #[must_use]
+    pub fn into_failure(self) -> E {
+        self.inner.source
+    }
+
     /// The field, prefixed with `prefix`: how a caller holding the parsed
     /// message inside another reports it, e.g. under `item` or
     /// `requests[1].item`.
@@ -468,6 +481,17 @@ mod tests {
         let error = FieldError::new(name(), Refused);
         assert_eq!(error.clone(), error);
         assert_ne!(error, FieldError::new(item(), Refused));
+    }
+
+    #[test]
+    fn a_field_error_gives_its_failure_back() {
+        let error = FieldError::new(name(), "no such segment");
+        assert_eq!(*error.failure(), "no such segment");
+
+        // The same failure, about another field.
+        let other = FieldError::new(item(), error.into_failure());
+        assert_eq!(other.path(), &item());
+        assert_eq!(*other.failure(), "no such segment");
     }
 
     #[test]
