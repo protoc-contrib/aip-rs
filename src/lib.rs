@@ -117,3 +117,29 @@ pub use resource::{Resource, ResourceName, ResourcePattern};
 //
 // Revisit if a buffa release lands `reflect_mut`: field behavior could then
 // move here behind a `buffa` feature, as aip-go does with protoreflect.
+
+#[cfg(all(test, feature = "connect"))]
+mod tests {
+    use connectrpc::{ConnectRpcService, Router};
+
+    use crate::{
+        FieldBehaviorInterceptor, PrepareInterceptor, Preparer, Procedure,
+        error_interceptor::ErrorInterceptor, reject_prepare,
+    };
+
+    static PROCEDURES: &[Procedure] = &[];
+    static PREPARERS: &[Preparer] = &[];
+
+    /// Every interceptor a service registers, built as a service builds it.
+    #[test]
+    fn every_interceptor_registers_on_a_service() {
+        let _service = ConnectRpcService::new(Router::new())
+            .with_interceptor(
+                ErrorInterceptor::new()
+                    .with_default_error_info("example.com")
+                    .with_request_id(|_| None),
+            )
+            .with_interceptor(FieldBehaviorInterceptor::new(PROCEDURES))
+            .with_interceptor(PrepareInterceptor::new(PREPARERS).with_reject(reject_prepare));
+    }
+}
