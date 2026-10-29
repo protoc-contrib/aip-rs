@@ -14,20 +14,10 @@
 //! `FieldMask` a resource implies. The optional `descriptor` feature adds
 //! buffa-descriptor.
 //!
-//! ```
-//! use aip::ResourcePattern;
-//!
-//! let pattern: ResourcePattern = "publishers/{publisher}/books/{book}".parse()?;
-//!
-//! let ids = pattern.scan("publishers/p1/books/b1")?;
-//! assert_eq!(ids, ["p1", "b1"]);
-//! assert_eq!(pattern.format(&ids), "publishers/p1/books/b1");
-//! # Ok::<_, Box<dyn std::error::Error>>(())
-//! ```
-//!
 //! # The AIPs implemented here
 //!
-//! - AIP-122 resource names -- [`ResourcePattern`], [`ResourceName`]
+//! - AIP-122 resource names -- [`ResourceName`], what a generated name type
+//!   satisfies
 //! - AIP-159 wildcards -- [`resource::WILDCARD`]
 //! - AIP-123 resources -- [`Resource`], linking a resource to its typed name
 //! - AIP-134 field masks -- [`Resource::implied_field_mask`] for an update's
@@ -53,7 +43,7 @@
 //! # Names
 //!
 //! The crate is published as `aip-rs` because `aip` is taken on crates.io, but
-//! its library name is `aip`, so generated code reads `aip::ResourcePattern`.
+//! its library name is `aip`, so generated code reads `aip::ResourceName`.
 //! The type you reach for is re-exported at the crate root; the error types
 //! stay in [`resource`], where they are rarely named and easy to find.
 //!
@@ -87,7 +77,7 @@ pub use request::{
     },
     writes::{DynResource, ResourceWrite, ResourceWrites, WriteMethod},
 };
-pub use resource::{Resource, ResourceName, ResourcePattern};
+pub use resource::{Resource, ResourceName};
 
 // Not implemented here, deliberately:
 //

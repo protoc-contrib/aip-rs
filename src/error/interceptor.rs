@@ -172,7 +172,7 @@ mod tests {
     //! What a client reads is the Connect error body, so each test calls over HTTP
     //! and reads the details back out of it.
     use super::ErrorInterceptor;
-    use crate::error::{ConnectErrorExt as _, debug_info, entry_status, error_info, resource_info};
+    use crate::error::{ConnectErrorExt as _, debug_info, error_info, resource_info, status};
     use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
     use buffa::Message as _;
     use buffa_protos::google::rpc::{DebugInfo, ErrorInfo, RequestInfo};
@@ -361,9 +361,6 @@ mod tests {
             fn validate(&self) -> Result<(), crate::resource::InvalidResourceIdError> {
                 Ok(())
             }
-            fn contains_wildcard(&self) -> bool {
-                false
-            }
         }
 
         let service = service(
@@ -403,6 +400,6 @@ mod tests {
             .expect("a DebugInfo");
         assert_eq!(info.detail, "y");
         // And the status of the same error has none.
-        assert!(entry_status(&error, 0).details.is_empty());
+        assert!(status(&error).details.is_empty());
     }
 }
