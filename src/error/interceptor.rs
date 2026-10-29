@@ -358,7 +358,7 @@ mod tests {
             fn pattern(&self) -> &str {
                 "shelves/{shelf}"
             }
-            fn validate(&self) -> Result<(), crate::resource::InvalidResourceIdError> {
+            fn validate(&self) -> Result<(), crate::resource::NameError> {
                 Ok(())
             }
         }

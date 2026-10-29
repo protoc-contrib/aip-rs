@@ -11,7 +11,7 @@ use super::path::{FieldPath, FieldResolver};
 /// can name the field in an `InvalidArgument` -- AIP-193's
 /// `google.rpc.BadRequest` -- without typing it again at the call site.
 ///
-/// `E` is the failure itself, e.g. [`ParseError`]. `Display` is
+/// `E` is the failure itself, e.g. [`NameError`]. `Display` is
 /// `name: <the failure>`, and [`source`](std::error::Error::source) is the
 /// failure, so a chain that logs sources shows both. The path is the field's
 /// own, from the message that was parsed: the generated `parse_name` on a
@@ -23,7 +23,7 @@ use super::path::{FieldPath, FieldResolver};
 ///
 /// The failure and the path are boxed together, so a `Result` of it stays one
 /// pointer wide in its `Err`, whatever `E` is: a bare path and a
-/// [`ParseError`] next to each other would trip clippy's `result_large_err`
+/// [`NameError`] next to each other would trip clippy's `result_large_err`
 /// on every function that returns one.
 ///
 /// ```
@@ -36,7 +36,7 @@ use super::path::{FieldPath, FieldResolver};
 /// assert_eq!(error.to_string(), "item.name: no such segment");
 /// ```
 ///
-/// [`ParseError`]: crate::resource::ParseError
+/// [`NameError`]: crate::resource::NameError
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldError<E> {
     inner: Box<FieldErrorInner<E>>,
@@ -148,7 +148,7 @@ mod tests {
         // What keeps clippy's `result_large_err` quiet on every function that
         // returns one.
         assert_eq!(
-            core::mem::size_of::<FieldError<crate::resource::ParseError>>(),
+            core::mem::size_of::<FieldError<crate::resource::NameError>>(),
             core::mem::size_of::<usize>()
         );
     }

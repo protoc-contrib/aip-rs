@@ -254,7 +254,7 @@ mod tests {
             "shelves/{shelf}"
         }
 
-        fn validate(&self) -> Result<(), crate::resource::InvalidResourceIdError> {
+        fn validate(&self) -> Result<(), crate::resource::NameError> {
             Ok(())
         }
     }

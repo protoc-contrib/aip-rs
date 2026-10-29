@@ -38,7 +38,7 @@ pub trait ResourceName: fmt::Display {
     fn pattern(&self) -> &str;
 
     /// Whether every variable segment is usable.
-    fn validate(&self) -> Result<(), InvalidResourceIdError>;
+    fn validate(&self) -> Result<(), NameError>;
 
     /// The fully-qualified name, e.g.
     /// `//example.com/publishers/p1/books/b1`.
@@ -142,21 +142,22 @@ fn names_kind<M: FieldBehavior>(schema: &M, kind: FieldBehaviorKind, path: &str)
         })
 }
 
-/// Why a string does not parse as a resource name -- what every generated
-/// `parse` returns, and what a [`FieldError`](crate::FieldError) from
+/// What is wrong with a resource name -- a string that does not parse as one,
+/// or a name with a segment that is not usable -- what every generated `parse`
+/// and `validate` returns, and what a [`FieldError`](crate::FieldError) from
 /// `parse_name` and `parse_<field>` says is wrong.
 ///
 /// The message is the one aip-go gives for the same failure, so a name fails
 /// with the same words in either: `parse "x": bad number of segments, want: 4,
-/// got: 3`. Map it to `InvalidArgument` at the RPC boundary.
+/// got: 3`, or `book: empty` for a segment that has no value. Map it to
+/// `InvalidArgument` at the RPC boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseError {
+pub struct NameError {
     message: String,
 }
 
-impl ParseError {
-    /// Builds the error for a name that did not parse, with `message` saying
-    /// why.
+impl NameError {
+    /// Builds the error for a name, with `message` saying what is wrong with it.
     #[must_use]
     pub fn new(message: impl Into<String>) -> Self {
         Self {
@@ -165,62 +166,13 @@ impl ParseError {
     }
 }
 
-impl fmt::Display for ParseError {
+impl fmt::Display for NameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)
     }
 }
 
-impl core::error::Error for ParseError {}
-
-/// Why a string is not usable as a resource ID segment: `book: empty`,
-/// `book: contains illegal character '/'` or `book: the wildcard is not an id`.
-///
-/// Map it to `InvalidArgument` at the RPC boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InvalidResourceIdError {
-    message: String,
-}
-
-impl InvalidResourceIdError {
-    /// The error for a variable segment with no value.
-    ///
-    /// A segment whose declared type is not a string has its own idea of what
-    /// "no value" is -- the nil UUID, say -- which only the code holding that
-    /// type can recognise, so this is what it reports with.
-    #[must_use]
-    pub fn empty(segment: &str) -> Self {
-        Self {
-            message: format!("{segment}: empty"),
-        }
-    }
-
-    /// The error for a variable segment that contains the `/` separator, which
-    /// would split one segment into two.
-    #[must_use]
-    pub fn separator(segment: &str) -> Self {
-        Self {
-            message: format!("{segment}: contains illegal character '/'"),
-        }
-    }
-
-    /// The error for a typed variable segment that is the [`WILDCARD`], which
-    /// is no id to write.
-    #[must_use]
-    pub fn wildcard(segment: &str) -> Self {
-        Self {
-            message: format!("{segment}: the wildcard is not an id"),
-        }
-    }
-}
-
-impl fmt::Display for InvalidResourceIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl core::error::Error for InvalidResourceIdError {}
+impl core::error::Error for NameError {}
 
 #[cfg(test)]
 mod tests {
@@ -428,25 +380,9 @@ mod tests {
     }
 
     #[test]
-    fn a_parse_error_says_what_the_parser_gave_it() {
+    fn a_name_error_says_what_the_parser_gave_it() {
         let message = r#"parse "publishers/p1": bad number of segments, want: 4, got: 2"#;
-        assert_eq!(ParseError::new(message).to_string(), message);
-    }
-
-    #[test]
-    fn an_id_that_is_not_usable_names_its_segment() {
-        assert_eq!(
-            InvalidResourceIdError::empty("book").to_string(),
-            "book: empty"
-        );
-        assert_eq!(
-            InvalidResourceIdError::separator("book").to_string(),
-            "book: contains illegal character '/'"
-        );
-        assert_eq!(
-            InvalidResourceIdError::wildcard("book").to_string(),
-            "book: the wildcard is not an id"
-        );
+        assert_eq!(NameError::new(message).to_string(), message);
     }
 
     struct Book;
@@ -466,7 +402,7 @@ mod tests {
             "books/{book}"
         }
 
-        fn validate(&self) -> Result<(), InvalidResourceIdError> {
+        fn validate(&self) -> Result<(), NameError> {
             Ok(())
         }
     }
