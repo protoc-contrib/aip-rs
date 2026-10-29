@@ -38,7 +38,7 @@ aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", ta
 | [203](https://google.aip.dev/203#output-only) | `OUTPUT_ONLY` paths in an explicit `update_mask`, ignored (`clear_field_mask`: removes the paths that name, or pass through, a field of a behavior) | `Resource` trait, built on the generated `validate_fields` | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` validation | protovalidate (`field_mask.in`) | — |
 | [203](https://google.aip.dev/203) | clearing the fields of a behavior (`clear_fields`), e.g. `OUTPUT_ONLY` on input, `INPUT_ONLY` on output | `FieldBehavior` trait, **generated** impls | ✅ |
-| [203](https://google.aip.dev/203) | checking the fields of a behavior within a scope (`validate_fields`), e.g. `REQUIRED` — all on a create, those the mask names on an update | `FieldBehavior` trait, **generated** impls; `FieldBehaviorError`, `FieldPath` (each field with its number and `FieldType`, as protovalidate reports a violation's path); `FieldError<E>`, a failure and the `FieldPath` of the field it was of, for a request field that does not parse | ✅ |
+| [203](https://google.aip.dev/203) | checking the fields of a behavior within a scope (`validate_fields`), e.g. `REQUIRED` — all on a create, those the mask names on an update | `FieldBehavior` trait, **generated** impls; `FieldBehaviorError`, `FieldPath` (each field with its number and `FieldType`, as protovalidate reports a violation's path); `FieldError`, a failure and the `FieldPath` of the field it was of, for a request field that does not parse | ✅ |
 | [203](https://google.aip.dev/203) | a behavior's `google.api.FieldBehavior` number (`TryFrom<i32>`/`From<FieldBehaviorKind> for i32`, `UnknownFieldBehavior`); a set of behaviors (`FieldBehaviorSet`); a descriptor field's behaviors (`FieldDescriptorExt`, `descriptor` feature) | `field_behavior`, `descriptor` | ✅ |
 | [203](https://google.aip.dev/203) | `REQUIRED` on a request's own fields, value rules | protovalidate (`required`, `min_len`, …) | — |
 | [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [233](https://google.aip.dev/233), [234](https://google.aip.dev/234) | a standard-method request's shape — the resources a create, update or batch writes (`ResourceWrites`, `ResourceWrite`, `WriteMethod`, `DynResource`) | `connect`, **generated** impls | ✅ |
@@ -152,7 +152,7 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 
 | aip-go | aip-rs | |
 | --- | --- | --- |
-| `NewErrorInfo`, `NewResourceInfo`, `NewRetryInfo`, `NewBadRequest`, `NewDebugInfo` | `error::error_info`, `resource_info`, `retry_info`, `bad_request`, `debug_info` | `bad_request` takes a `&FieldError<E>`, where Go panics on an error that is not one |
+| `NewErrorInfo`, `NewResourceInfo`, `NewRetryInfo`, `NewBadRequest`, `NewDebugInfo` | `error::error_info`, `resource_info`, `retry_info`, `bad_request`, `debug_info` | `bad_request` takes a `&FieldError`, where Go panics on an error that is not one |
 | `NewErrorDetail` | `ErrorDetail::from_message` | connectrpc's |
 | none | `ConnectErrorExt::detail::<M>()` | a Rust-only reader: Go reads a detail with `connectproto.UnmarshalErrorDetail` |
 | `NewStatus` | `error::status` | for a `ConnectError`: Rust has no other error to convert; it is less its `DebugInfo`, which Go's interceptor takes out later and nothing here wraps the response to do |
