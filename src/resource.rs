@@ -38,7 +38,7 @@ pub trait ResourceName: fmt::Display {
     fn pattern(&self) -> &str;
 
     /// Whether every variable segment is usable.
-    fn validate(&self) -> Result<(), NameError>;
+    fn validate(&self) -> Result<(), ResourceNameError>;
 
     /// The fully-qualified name, e.g.
     /// `//example.com/publishers/p1/books/b1`.
@@ -152,11 +152,11 @@ fn names_kind<M: FieldBehavior>(schema: &M, kind: FieldBehaviorKind, path: &str)
 /// got: 3`, or `book: empty` for a segment that has no value. Map it to
 /// `InvalidArgument` at the RPC boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NameError {
+pub struct ResourceNameError {
     message: String,
 }
 
-impl NameError {
+impl ResourceNameError {
     /// Builds the error for a name, with `message` saying what is wrong with it.
     #[must_use]
     pub fn new(message: impl Into<String>) -> Self {
@@ -166,13 +166,13 @@ impl NameError {
     }
 }
 
-impl fmt::Display for NameError {
+impl fmt::Display for ResourceNameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)
     }
 }
 
-impl core::error::Error for NameError {}
+impl core::error::Error for ResourceNameError {}
 
 #[cfg(test)]
 mod tests {
@@ -380,9 +380,9 @@ mod tests {
     }
 
     #[test]
-    fn a_name_error_says_what_the_parser_gave_it() {
+    fn a_resource_name_error_says_what_the_parser_gave_it() {
         let message = r#"parse "publishers/p1": bad number of segments, want: 4, got: 2"#;
-        assert_eq!(NameError::new(message).to_string(), message);
+        assert_eq!(ResourceNameError::new(message).to_string(), message);
     }
 
     struct Book;
@@ -402,7 +402,7 @@ mod tests {
             "books/{book}"
         }
 
-        fn validate(&self) -> Result<(), NameError> {
+        fn validate(&self) -> Result<(), ResourceNameError> {
             Ok(())
         }
     }
