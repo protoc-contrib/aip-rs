@@ -28,8 +28,8 @@
 //! then answers without the `DebugInfo` -- AIP-193 keeps debugging information
 //! out of a response -- and with the request's id as a `RequestInfo`, which a
 //! client can quote. A failed entry of a `Batch*` response is an error that is
-//! not returned but carried, as a `google.rpc.Status`: [`entry_status`]
-//! builds it the same way. Nothing wraps the response to find such an entry,
+//! not returned but carried, as a `google.rpc.Status`: [`status`] builds it
+//! the same way. Nothing wraps the response to find such an entry,
 //! as aip-go's interceptor does, so whatever builds one logs it, as
 //! [`log_level`] says it should be.
 
@@ -40,7 +40,7 @@ pub use interceptor::ErrorInterceptor;
 use std::{backtrace::Backtrace, time::Duration};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
-use buffa::{Message as _, MessageName};
+use buffa::MessageName;
 use buffa_protos::google::rpc::{
     BadRequest, DebugInfo, ErrorInfo, RequestInfo, ResourceInfo, RetryInfo, Status,
     bad_request::FieldViolation,
@@ -135,7 +135,7 @@ pub(crate) fn request_info(request_id: &str) -> ErrorDetail {
 ///
 /// AIP-193 keeps debugging information out of what a client sees:
 /// [`ErrorInterceptor`] logs it and answers without it, and
-/// [`entry_status`] leaves it out of a failed batch entry.
+/// [`status`] leaves it out of a failed batch entry.
 #[must_use]
 pub fn debug_info(cause: &dyn std::error::Error) -> ErrorDetail {
     ErrorDetail::from_message(
@@ -201,36 +201,16 @@ pub const fn log_level(code: ErrorCode) -> tracing::Level {
 }
 
 /// `error` as the `google.rpc.Status` a `Batch*` response entry carries when its
-/// request failed, for the entry at `index` of a batch request's `requests`: the
-/// code, numbered as gRPC numbers it, the message, and the details a unary error
-/// would carry -- as `Any` messages, which Connect carries as base64 text -- less
-/// its `google.rpc.DebugInfo` (AIP-193), with
-/// the fields of its `google.rpc.BadRequest` named under that entry, as
-/// `requests[1].name`: a field path is the request's, and the batch is the
-/// request a client sent. As aip-go's `NewEntryStatus`.
+/// request failed: the code, numbered as gRPC numbers it, the message, and the
+/// details a unary error would carry -- as `Any` messages, which Connect
+/// carries as base64 text -- less its `google.rpc.DebugInfo` (AIP-193). As
+/// aip-go's `NewStatus`.
+///
+/// The fields of its `google.rpc.BadRequest` are the request's, not the
+/// entry's: name them under the entry, as `requests[1].name`, where the batch
+/// is built.
 #[must_use]
-pub fn entry_status(error: &ConnectError, index: usize) -> Status {
-    build_status(error, |detail| {
-        if detail.type_url != BadRequest::FULL_NAME {
-            return Some(detail);
-        }
-        // A BadRequest that does not read has no field to name under the
-        // entry, and says nothing the entry's own code and message do not.
-        let mut request = BadRequest::decode_from_slice(&decode_value(&detail)?).ok()?;
-        for violation in &mut request.field_violations {
-            violation.field = format!("requests[{index}].{}", violation.field);
-        }
-        Some(ErrorDetail::from_message(BadRequest::FULL_NAME, &request))
-    })
-}
-
-/// What [`entry_status`] builds on: the status of `error`, each of
-/// its details but the `DebugInfo` passed through `map`, which drops the ones it
-/// answers `None` for.
-fn build_status(
-    error: &ConnectError,
-    mut map: impl FnMut(ErrorDetail) -> Option<ErrorDetail>,
-) -> Status {
+pub fn status(error: &ConnectError) -> Status {
     Status {
         // Every gRPC code, 1 to 16, fits; 2 is Unknown.
         code: i32::try_from(error.code.grpc_code()).unwrap_or(2),
@@ -239,11 +219,10 @@ fn build_status(
             .details
             .iter()
             .filter(|detail| detail.type_url != DebugInfo::FULL_NAME)
-            .filter_map(|detail| map(detail.clone()))
             .filter_map(|detail| {
                 Some(Any {
                     type_url: format!("type.googleapis.com/{}", detail.type_url),
-                    value: decode_value(&detail)?.into(),
+                    value: decode_value(detail)?.into(),
                     ..Any::default()
                 })
             })
@@ -254,6 +233,8 @@ fn build_status(
 
 #[cfg(test)]
 mod tests {
+    use buffa::Message as _;
+
     use super::*;
 
     struct Shelf;
@@ -273,12 +254,8 @@ mod tests {
             "shelves/{shelf}"
         }
 
-        fn validate(&self) -> Result<(), crate::resource::InvalidResourceIdError> {
+        fn validate(&self) -> Result<(), crate::resource::ResourceNameError> {
             Ok(())
-        }
-
-        fn contains_wildcard(&self) -> bool {
-            false
         }
     }
 
@@ -375,12 +352,11 @@ mod tests {
     #[test]
     fn a_status_carries_the_code_the_message_and_every_detail_but_the_debug_info() {
         let cause = std::io::Error::other("connection reset");
-        let status = entry_status(
+        let status = status(
             &ConnectError::not_found("The requested shelf was not found")
                 .with_detail(error_info("example.com", "SHELF_NOT_FOUND"))
                 .with_detail(resource_info(&Shelf))
                 .with_detail(debug_info(&cause)),
-            0,
         );
 
         assert_eq!(status.code, 5);
@@ -399,31 +375,5 @@ mod tests {
         );
         let info = ErrorInfo::decode_from_slice(&status.details[0].value).expect("an ErrorInfo");
         assert_eq!(info.reason, "SHELF_NOT_FOUND");
-    }
-
-    #[test]
-    fn an_entry_status_names_the_field_under_the_entry() {
-        use crate::{FieldPath, FieldType};
-
-        let field = FieldError::new(
-            FieldPath::field("name", 1, FieldType::String),
-            "no such shelf",
-        );
-        let status = entry_status(
-            &ConnectError::invalid_argument("The request contains invalid parameters")
-                .with_detail(error_info("example.com", "INVALID_NAME"))
-                .with_detail(bad_request(&field)),
-            2,
-        );
-
-        let request = status
-            .details
-            .iter()
-            .find(|detail| detail.type_url.ends_with("google.rpc.BadRequest"))
-            .map(|detail| BadRequest::decode_from_slice(&detail.value).expect("a BadRequest"))
-            .expect("a BadRequest");
-        assert_eq!(request.field_violations[0].field, "requests[2].name");
-        // The other details are as they were.
-        assert_eq!(status.details.len(), 2);
     }
 }
