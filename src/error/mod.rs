@@ -31,7 +31,7 @@
 //! not returned but carried, as a `google.rpc.Status`: [`status`] builds it
 //! the same way. Nothing wraps the response to find such an entry,
 //! as aip-go's interceptor does, so whatever builds one logs it, as
-//! [`log_level`] says it should be.
+//! [`error_log_level`] says it should be.
 
 pub mod interceptor;
 
@@ -103,7 +103,7 @@ pub fn retry_info(delay: Duration) -> ErrorDetail {
 /// `ErrorInfo` reason says which kind, and the error's own text can carry the
 /// value.
 #[must_use]
-pub fn bad_request<E>(error: &FieldError<E>) -> ErrorDetail {
+pub fn bad_request(error: &FieldError) -> ErrorDetail {
     ErrorDetail::from_message(
         BadRequest::FULL_NAME,
         &BadRequest {
@@ -191,7 +191,7 @@ fn decode_value(detail: &ErrorDetail) -> Option<Vec<u8>> {
 /// name, a duplicate, a missing row -- which stays out of the error stream. As
 /// aip-go's `ErrorLogLevel`.
 #[must_use]
-pub const fn log_level(code: ErrorCode) -> tracing::Level {
+pub const fn error_log_level(code: ErrorCode) -> tracing::Level {
     match code {
         ErrorCode::Internal | ErrorCode::Unknown | ErrorCode::DataLoss | ErrorCode::Unavailable => {
             tracing::Level::ERROR
@@ -327,7 +327,7 @@ mod tests {
             ConnectError::unavailable("x"),
         ] {
             assert_eq!(
-                log_level(error.code),
+                error_log_level(error.code),
                 tracing::Level::ERROR,
                 "{:?}",
                 error.code
@@ -341,7 +341,7 @@ mod tests {
             ConnectError::aborted("x"),
         ] {
             assert_eq!(
-                log_level(error.code),
+                error_log_level(error.code),
                 tracing::Level::WARN,
                 "{:?}",
                 error.code

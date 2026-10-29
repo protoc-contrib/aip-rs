@@ -18,7 +18,7 @@
 //!
 //! - AIP-122 resource names -- [`ResourceName`], what a generated name type
 //!   satisfies
-//! - AIP-159 wildcards -- [`resource::WILDCARD`]
+//! - AIP-159 wildcards -- [`resource::RESOURCE_WILDCARD`]
 //! - AIP-123 resources -- [`Resource`], linking a resource to its typed name
 //! - AIP-134 field masks -- [`Resource::implied_field_mask`] for an update's
 //!   omitted mask, [`Resource::clear_field_mask`] to remove the paths of a
@@ -71,10 +71,7 @@ pub use field::{
 #[cfg(feature = "connect")]
 pub use request::{
     behavior::{FieldBehaviorInterceptor, Procedure},
-    prepare::{
-        PrepareError, PrepareFailure, PrepareInterceptor, Preparer, Reject, RequestPreparer,
-        reject_prepare,
-    },
+    prepare::{PrepareInterceptor, Preparer, RequestPreparer},
     writes::{DynResource, ResourceWrite, ResourceWrites, WriteMethod},
 };
 pub use resource::{Resource, ResourceName};
@@ -108,7 +105,6 @@ mod tests {
 
     use crate::{
         FieldBehaviorInterceptor, PrepareInterceptor, Preparer, Procedure, error::ErrorInterceptor,
-        reject_prepare,
     };
 
     static PROCEDURES: &[Procedure] = &[];
@@ -124,6 +120,8 @@ mod tests {
                     .with_request_id(|_| None),
             )
             .with_interceptor(FieldBehaviorInterceptor::new(PROCEDURES))
-            .with_interceptor(PrepareInterceptor::new(PREPARERS).with_reject(reject_prepare));
+            .with_interceptor(PrepareInterceptor::new(PREPARERS).with_reject(|error| {
+                connectrpc::ConnectError::invalid_argument(error.to_string())
+            }));
     }
 }

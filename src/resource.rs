@@ -16,7 +16,7 @@ use crate::{FieldBehavior, FieldBehaviorKind, FieldScope};
 /// all values of this segment".
 ///
 /// See <https://google.aip.dev/159>.
-pub const WILDCARD: &str = "-";
+pub const RESOURCE_WILDCARD: &str = "-";
 
 /// The behaviour shared by every resource name type emitted by
 /// `protoc-gen-rust-aip`.

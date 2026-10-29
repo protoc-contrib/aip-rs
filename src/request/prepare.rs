@@ -10,7 +10,7 @@
 //!
 //! ```ignore
 //! impl aip::RequestPreparer for ListBooksRequest {
-//!     fn prepare(&mut self) -> Result<(), aip::PrepareError> {
+//!     fn prepare(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //!         if self.page_size == 0 {
 //!             self.page_size = 50;
 //!         }
@@ -27,7 +27,7 @@
 //!     .with_interceptor(aip::PrepareInterceptor::new(PREPARERS));
 //! ```
 
-use std::{error::Error, fmt};
+use std::error::Error;
 
 use connectrpc::interceptor::{StreamRequest, StreamResponse, UnaryRequest, UnaryResponse};
 use connectrpc::{
@@ -51,59 +51,30 @@ pub trait RequestPreparer {
     ///
     /// # Errors
     ///
-    /// What the request cannot be prepared from, with the field it names: the
-    /// caller's mistake, which [`PrepareInterceptor`] answers as
-    /// `InvalidArgument`.
-    fn prepare(&mut self) -> Result<(), PrepareError> {
+    /// What the request cannot be prepared from: the caller's mistake, which
+    /// [`PrepareInterceptor`] answers as `InvalidArgument`. A [`FieldError`] names
+    /// the field it is about, as a `*FieldError` does in aip-go, where `Prepare`
+    /// returns any `error`.
+    fn prepare(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
-    }
-}
-
-/// Why [`RequestPreparer::prepare`] could not prepare a request: the field it
-/// could not read, and why -- as aip-go's `Prepare` returns a `*FieldError`.
-pub type PrepareError = FieldError<PrepareFailure>;
-
-/// What was wrong with the field of a [`PrepareError`]: any error, or a text,
-/// made one with [`new`](Self::new). Its `Display` is the cause's, and the
-/// field is the [`FieldError`]'s.
-#[derive(Debug)]
-pub struct PrepareFailure(Box<dyn Error + Send + Sync>);
-
-impl PrepareFailure {
-    /// The failure `error`, which can be a parse error or a plain text.
-    #[must_use]
-    pub fn new(error: impl Into<Box<dyn Error + Send + Sync>>) -> Self {
-        Self(error.into())
-    }
-}
-
-impl fmt::Display for PrepareFailure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl Error for PrepareFailure {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.0.source()
     }
 }
 
 /// Answers a request [`RequestPreparer::prepare`] refused, with the error to
 /// return: where a service adds the details that are its own, such as an
 /// `ErrorInfo`. See [`PrepareInterceptor::with_reject`].
-pub type Reject = fn(PrepareError) -> ConnectError;
+type Reject = fn(Box<dyn Error + Send + Sync>) -> ConnectError;
 
 /// The default [`Reject`]: `InvalidArgument` with the fixed message "The
-/// request contains invalid parameters", the field `error` names as a
-/// `google.rpc.BadRequest`, and `error` as the cause, with its
-/// `google.rpc.DebugInfo`. As aip-go's default.
-#[must_use]
-pub fn reject_prepare(error: PrepareError) -> ConnectError {
-    ConnectError::invalid_argument("The request contains invalid parameters")
-        .with_detail(bad_request(&error))
-        .with_detail(debug_info(&error))
-        .with_source(error)
+/// request contains invalid parameters", the field `error` names, if it is a
+/// [`FieldError`], as a `google.rpc.BadRequest`, and `error` as the cause, with
+/// its `google.rpc.DebugInfo`. As aip-go's default.
+fn reject_prepare(error: Box<dyn Error + Send + Sync>) -> ConnectError {
+    let mut rejected = ConnectError::invalid_argument("The request contains invalid parameters");
+    if let Some(field) = error.downcast_ref::<FieldError>() {
+        rejected = rejected.with_detail(bad_request(field));
+    }
+    rejected.with_detail(debug_info(&*error)).with_source(error)
 }
 
 /// How one procedure's request is prepared: its `path`, and the step that
@@ -152,8 +123,8 @@ where
 /// so an omitted id is minted and every field validated by then. Requests are
 /// found by procedure in the table it is given, and decoded once as their own
 /// type. Calls a client makes, and procedures the table does not list, pass
-/// through. A refusal is answered by [`reject_prepare`], or by what
-/// [`with_reject`](Self::with_reject) sets.
+/// through. A refusal is answered with `InvalidArgument`, naming the field a
+/// [`FieldError`] is about, or by what [`with_reject`](Self::with_reject) sets.
 #[derive(Debug, Clone, Copy)]
 pub struct PrepareInterceptor {
     preparers: &'static [Preparer],
@@ -170,10 +141,13 @@ impl PrepareInterceptor {
         }
     }
 
-    /// Answers a request `prepare` refused with `reject`, in place of
-    /// [`reject_prepare`]. As aip-go's `reject` argument.
+    /// Answers a request `prepare` refused with `reject`, in place of the
+    /// default. As aip-go's `reject` argument.
     #[must_use]
-    pub const fn with_reject(mut self, reject: Reject) -> Self {
+    pub const fn with_reject(
+        mut self,
+        reject: fn(Box<dyn Error + Send + Sync>) -> ConnectError,
+    ) -> Self {
         self.reject = reject;
         self
     }
@@ -232,15 +206,20 @@ mod tests {
     use super::*;
     use crate::error::ConnectErrorExt as _;
 
-    /// A request that upper-cases its paths, and refuses one that is empty.
+    /// A request that upper-cases its paths, and refuses one that is empty, naming
+    /// it, or one that is `boom`, as any error that names no field.
     impl RequestPreparer for FieldMask {
-        fn prepare(&mut self) -> Result<(), PrepareError> {
+        fn prepare(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
             for (index, path) in self.paths.iter_mut().enumerate() {
                 if path.is_empty() {
                     return Err(FieldError::new(
                         crate::FieldPath::index("paths", 1, crate::FieldType::String, index),
-                        PrepareFailure::new("it is empty"),
-                    ));
+                        "it is empty",
+                    )
+                    .into());
+                }
+                if path == "boom" {
+                    return Err("it does not like that".into());
                 }
                 *path = path.to_uppercase();
             }
@@ -324,6 +303,16 @@ mod tests {
 
         assert_eq!(message, "The request contains invalid parameters");
         assert_eq!(field, "paths[1]");
+    }
+
+    #[tokio::test]
+    async fn an_error_that_names_no_field_is_refused_without_one() {
+        let service = service(PrepareInterceptor::new(PREPARERS));
+
+        let (message, field) = call(&service, ECHO, &["boom"]).await.unwrap_err();
+
+        assert_eq!(message, "The request contains invalid parameters");
+        assert_eq!(field, "");
     }
 
     #[tokio::test]
