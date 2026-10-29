@@ -3,28 +3,34 @@
 //! See [`FieldError`]; its path is a [`FieldPath`].
 
 use core::fmt;
+use std::sync::Arc;
 
 use super::path::{FieldPath, FieldResolver};
+
+/// The failure a [`FieldError`] is about: any error, or a text.
+type Failure = Arc<dyn core::error::Error + Send + Sync + 'static>;
 
 /// Why the value of a request field is invalid, and which field it was: what
 /// a generated `parse` method on a request or a resource returns, so a caller
 /// can name the field in an `InvalidArgument` -- AIP-193's
-/// `google.rpc.BadRequest` -- without typing it again at the call site.
+/// `google.rpc.BadRequest` -- without typing it again at the call site. As
+/// aip-go's `*FieldError`, which holds the field's path and an `error`.
 ///
-/// `E` is the failure itself, e.g. [`ResourceNameError`]. `Display` is
-/// `name: <the failure>`, and [`source`](std::error::Error::source) is the
-/// failure, so a chain that logs sources shows both. The path is the field's
-/// own, from the message that was parsed: the generated `parse_name` on a
-/// request names `name`, and a caller holding that message inside another puts
-/// it where it is with [`prefixed`](Self::prefixed).
+/// The failure is any error, or a text, as aip-go's is any `error`: what the
+/// parse of a name says, say, a [`ResourceNameError`]. `Display` is
+/// `name: <the failure>`, and [`source`](core::error::Error::source) is the
+/// failure, so a chain that logs sources shows both, and a caller that wants
+/// the failure as its own type asks for it with `downcast_ref`. The path is
+/// the field's own, from the message that was parsed: the generated
+/// `parse_name` on a request names `name`, and a caller holding that message
+/// inside another puts it where it is with [`prefixed`](Self::prefixed).
 ///
 /// protoc-gen-rust-aip's generated `parse*` methods return it, with the field's
 /// number and type already filled in.
 ///
 /// The failure and the path are boxed together, so a `Result` of it stays one
-/// pointer wide in its `Err`, whatever `E` is: a bare path and a
-/// [`ResourceNameError`] next to each other would trip clippy's `result_large_err`
-/// on every function that returns one.
+/// pointer wide in its `Err`: a bare path and a failure next to each other would
+/// trip clippy's `result_large_err` on every function that returns one.
 ///
 /// ```
 /// use aip::{FieldError, FieldPath, FieldType};
@@ -37,24 +43,30 @@ use super::path::{FieldPath, FieldResolver};
 /// ```
 ///
 /// [`ResourceNameError`]: crate::resource::ResourceNameError
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FieldError<E> {
-    inner: Box<FieldErrorInner<E>>,
+#[derive(Debug, Clone)]
+pub struct FieldError {
+    inner: Box<FieldErrorInner>,
 }
 
 /// What a [`FieldError`] holds, behind its box.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct FieldErrorInner<E> {
+#[derive(Debug, Clone)]
+struct FieldErrorInner {
     path: FieldPath,
-    source: E,
+    source: Failure,
 }
 
-impl<E> FieldError<E> {
+impl FieldError {
     /// The failure `source` of the field at `path`.
     #[must_use]
-    pub fn new(path: FieldPath, source: E) -> Self {
+    pub fn new(
+        path: FieldPath,
+        source: impl Into<Box<dyn core::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
         Self {
-            inner: Box::new(FieldErrorInner { path, source }),
+            inner: Box::new(FieldErrorInner {
+                path,
+                source: Arc::from(source.into()),
+            }),
         }
     }
 
@@ -66,7 +78,10 @@ impl<E> FieldError<E> {
     ///
     /// As [`FieldPath::of`], if `name` is not a field of `M`.
     #[must_use]
-    pub fn of<M: FieldResolver>(name: &str, source: E) -> Self {
+    pub fn of<M: FieldResolver>(
+        name: &str,
+        source: impl Into<Box<dyn core::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
         Self::new(FieldPath::of::<M>(name), source)
     }
 
@@ -77,17 +92,11 @@ impl<E> FieldError<E> {
         &self.inner.path
     }
 
-    /// Why the value is invalid: the failure the error was made of.
+    /// Why the value is invalid: the failure the error was made of, as aip-go's
+    /// `Unwrap`.
     #[must_use]
-    pub fn failure(&self) -> &E {
-        &self.inner.source
-    }
-
-    /// The failure the error was made of, without the field: how a caller
-    /// gives the same failure another field to be about.
-    #[must_use]
-    pub fn into_failure(self) -> E {
-        self.inner.source
+    pub fn failure(&self) -> &(dyn core::error::Error + Send + Sync + 'static) {
+        &*self.inner.source
     }
 
     /// The field, prefixed with `prefix`: how a caller holding the parsed
@@ -101,25 +110,21 @@ impl<E> FieldError<E> {
 }
 
 /// Writes `item.name: <the failure>`.
-impl<E: fmt::Display> fmt::Display for FieldError<E> {
+impl fmt::Display for FieldError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.inner.path, self.inner.source)
     }
 }
 
-impl<E: core::error::Error + 'static> core::error::Error for FieldError<E> {
+impl core::error::Error for FieldError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        Some(&self.inner.source)
+        Some(&*self.inner.source)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{FieldError, FieldPath, FieldResolver, FieldType};
-
-    fn item() -> FieldPath {
-        FieldPath::field("item", 1, FieldType::Message)
-    }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Refused;
@@ -148,7 +153,7 @@ mod tests {
         // What keeps clippy's `result_large_err` quiet on every function that
         // returns one.
         assert_eq!(
-            core::mem::size_of::<FieldError<crate::resource::ResourceNameError>>(),
+            core::mem::size_of::<FieldError>(),
             core::mem::size_of::<usize>()
         );
     }
@@ -174,10 +179,18 @@ mod tests {
     }
 
     #[test]
-    fn a_field_error_clones_and_compares() {
+    fn a_field_error_clones() {
         let error = FieldError::new(name(), Refused);
-        assert_eq!(error.clone(), error);
-        assert_ne!(error, FieldError::new(item(), Refused));
+        let clone = error.clone();
+        assert_eq!(clone.path(), error.path());
+        assert_eq!(clone.to_string(), error.to_string());
+    }
+
+    #[test]
+    fn a_field_error_says_which_error_it_is_about() {
+        let error = FieldError::new(name(), Refused);
+        assert!(error.failure().downcast_ref::<Refused>().is_some());
+        assert!(error.failure().downcast_ref::<std::io::Error>().is_none());
     }
 
     #[test]
@@ -192,17 +205,6 @@ mod tests {
 
         let error = FieldError::of::<Request>("update_mask", "no such path");
         assert_eq!(error.path().to_string(), "update_mask");
-        assert_eq!(*error.failure(), "no such path");
-    }
-
-    #[test]
-    fn a_field_error_gives_its_failure_back() {
-        let error = FieldError::new(name(), "no such segment");
-        assert_eq!(*error.failure(), "no such segment");
-
-        // The same failure, about another field.
-        let other = FieldError::new(item(), error.into_failure());
-        assert_eq!(other.path(), &item());
-        assert_eq!(*other.failure(), "no such segment");
+        assert_eq!(error.failure().to_string(), "no such path");
     }
 }

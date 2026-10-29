@@ -38,7 +38,7 @@ aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", ta
 | [203](https://google.aip.dev/203#output-only) | `OUTPUT_ONLY` paths in an explicit `update_mask`, ignored (`clear_field_mask`: removes the paths that name, or pass through, a field of a behavior) | `Resource` trait, built on the generated `validate_fields` | ✅ |
 | [134](https://google.aip.dev/134) | `update_mask` validation | protovalidate (`field_mask.in`) | — |
 | [203](https://google.aip.dev/203) | clearing the fields of a behavior (`clear_fields`), e.g. `OUTPUT_ONLY` on input, `INPUT_ONLY` on output | `FieldBehavior` trait, **generated** impls | ✅ |
-| [203](https://google.aip.dev/203) | checking the fields of a behavior within a scope (`validate_fields`), e.g. `REQUIRED` — all on a create, those the mask names on an update | `FieldBehavior` trait, **generated** impls; `FieldBehaviorError`, `FieldPath` (each field with its number and `FieldType`, as protovalidate reports a violation's path); `FieldError<E>`, a failure and the `FieldPath` of the field it was of, for a request field that does not parse | ✅ |
+| [203](https://google.aip.dev/203) | checking the fields of a behavior within a scope (`validate_fields`), e.g. `REQUIRED` — all on a create, those the mask names on an update | `FieldBehavior` trait, **generated** impls; `FieldBehaviorError`, `FieldPath` (each field with its number and `FieldType`, as protovalidate reports a violation's path); `FieldError`, a failure and the `FieldPath` of the field it was of, for a request field that does not parse | ✅ |
 | [203](https://google.aip.dev/203) | a behavior's `google.api.FieldBehavior` number (`TryFrom<i32>`/`From<FieldBehaviorKind> for i32`, `UnknownFieldBehavior`); a set of behaviors (`FieldBehaviorSet`); a descriptor field's behaviors (`FieldDescriptorExt`, `descriptor` feature) | `field_behavior`, `descriptor` | ✅ |
 | [203](https://google.aip.dev/203) | `REQUIRED` on a request's own fields, value rules | protovalidate (`required`, `min_len`, …) | — |
 | [133](https://google.aip.dev/133), [134](https://google.aip.dev/134), [233](https://google.aip.dev/233), [234](https://google.aip.dev/234) | a standard-method request's shape — the resources a create, update or batch writes (`ResourceWrites`, `ResourceWrite`, `WriteMethod`, `DynResource`) | `connect`, **generated** impls | ✅ |
@@ -60,7 +60,7 @@ src/
 │   ├── behavior.rs        field behavior (AIP-203)
 │   └── descriptor.rs      feature `descriptor`
 ├── error/                 errors a client sees (AIP-193, 194)
-│   ├── mod.rs             details, status, log_level
+│   ├── mod.rs             details, status, error_log_level
 │   └── interceptor.rs     ErrorInterceptor
 └── request/               what a server does with a request (AIP-133, 134, 233, 234)
     ├── writes.rs          ResourceWrites
@@ -152,26 +152,26 @@ and what stands for it. Anything not in it, in either direction, is a bug.
 
 | aip-go | aip-rs | |
 | --- | --- | --- |
-| `NewErrorInfo`, `NewResourceInfo`, `NewRetryInfo`, `NewBadRequest`, `NewDebugInfo` | `error::error_info`, `resource_info`, `retry_info`, `bad_request`, `debug_info` | `bad_request` takes a `&FieldError<E>`, where Go panics on an error that is not one |
+| `NewErrorInfo`, `NewResourceInfo`, `NewRetryInfo`, `NewBadRequest`, `NewDebugInfo` | `error::error_info`, `resource_info`, `retry_info`, `bad_request`, `debug_info` | `bad_request` takes a `&FieldError`, where Go panics on an error that is not one |
 | `NewErrorDetail` | `ErrorDetail::from_message` | connectrpc's |
 | none | `ConnectErrorExt::detail::<M>()` | a Rust-only reader: Go reads a detail with `connectproto.UnmarshalErrorDetail` |
 | `NewStatus` | `error::status` | for a `ConnectError`: Rust has no other error to convert; it is less its `DebugInfo`, which Go's interceptor takes out later and nothing here wraps the response to do |
-| `ErrorLogLevel` | `error::log_level` | |
+| `ErrorLogLevel` | `error::error_log_level` | |
 | `NewErrorInterceptor`, `WithDefaultErrorInfo`, `WithErrorRequestID` | `error::ErrorInterceptor`, `with_default_error_info`, `with_request_id` | |
 | `WithErrorLogger` | none | the logs are `tracing` events |
-| the interceptor's `Send` over a batch response | `error::status` and `log_level`, called where the entry's status is built | an interceptor has no reflection to find the entries in, so the caller logs them |
-| `FieldError`, `NewFieldError`, `FieldPath` | `FieldError<E>`, `FieldError::of::<M>`, `FieldPath::of::<M>` | `Err` is `failure()`, `Field()` is the path's `Display` |
+| the interceptor's `Send` over a batch response | `error::status` and `error_log_level`, called where the entry's status is built | an interceptor has no reflection to find the entries in, so the caller logs them |
+| `FieldError`, `NewFieldError`, `FieldPath` | `FieldError`, `FieldError::of::<M>`, `FieldPath::of::<M>` | the failure is any boxed error, as Go's `Err error`: `failure()` is `Unwrap`, and `downcast_ref` asks for its type; `Field()` is the path's `Display` |
 | `FieldBehaviorKind`, `FieldBehaviorSet` (`Has`, `HasAny`, `All`), `FieldBehaviorsOf` | `FieldBehaviorKind`, `FieldBehaviorSet` (`contains`, `intersects`, `iter`), `FieldDescriptorExt` | |
 | `ClearFields`, `ValidateFields`, `FieldBehaviorError` | `FieldBehavior::clear_fields`, `validate_fields`, `FieldBehaviorError` | generated, as there is no reflection |
 | `ImpliedFieldMask`, `ClearFieldMask` | `Resource::implied_field_mask`, `clear_field_mask` | |
 | `NewFieldBehaviorInterceptor` | `FieldBehaviorInterceptor::new(PROCEDURES)` | the table stands for reflection |
 | `ResourceWrites`, `ResourceWrite`, `ResourceCreate`, `ResourceUpdate` | `ResourceWrites::for_each_write`, `ResourceWrite`, `WriteMethod::{Create, Update}` | an enum where Go has two optional pointers |
-| `ResourceWildcard` | `resource::WILDCARD` | a name holds a segment as a string, which can be `-`; whether it does is for the consumer to compare |
+| `ResourceWildcard` | `resource::RESOURCE_WILDCARD` | a name holds a segment as a string, which can be `-`; whether it does is for the consumer to compare |
 | none | none | the names and their parsers, `Validate` and `<segment>_id()` are generated by `protoc-gen-rust-aip`, as `protoc-gen-go-aip`'s are: nothing of the parsing lives here |
 | `ResourceName` | `ResourceName` | `Type` is `resource_type`, `type` being a keyword |
 | the `error` a parse and a `Validate` return | `ResourceNameError`, a message | one type for every generated name, where Go has `fmt.Errorf`; the messages are Go's |
-| none | `FieldScope`, `DynResource`, `UnknownFieldBehavior`, `FieldBehaviorSet::iter`'s `Iter`, `PrepareError`, `PrepareFailure`, `reject_prepare` | Rust-only: what the table standing for reflection and the type system need, which Go reads from a descriptor or an `error` |
-| `RequestPreparer`, `NewPrepareInterceptor(reject)` | `RequestPreparer`, `PrepareInterceptor::new(PREPARERS).with_reject(..)` | a table of `Preparer`s stands for reflection; a request's failure is a `FieldError<PrepareFailure>`, so it always names a field |
+| none | `FieldScope`, `DynResource`, `UnknownFieldBehavior`, `FieldBehaviorSet::iter`'s `Iter` | Rust-only: what the table standing for reflection and the type system need, which Go reads from a descriptor or an `error` |
+| `RequestPreparer`, `NewPrepareInterceptor(reject)` | `RequestPreparer`, `PrepareInterceptor::new(PREPARERS).with_reject(..)` | a table of `Preparer`s stands for reflection; `prepare` returns any boxed error, and the default reject names the field a `FieldError` in it is about, as Go's `rejectPrepare` does |
 
 ## Scope: what is deliberately not here
 

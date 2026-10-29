@@ -11,7 +11,7 @@ use buffa_protos::google::rpc::{DebugInfo, ErrorInfo};
 use connectrpc::interceptor::{UnaryRequest, UnaryResponse};
 use connectrpc::{ConnectError, Interceptor, Next, RequestContext, SpecOrigin};
 
-use crate::error::{ConnectErrorExt as _, error_info, log_level, request_info};
+use crate::error::{ConnectErrorExt as _, error_info, error_log_level, request_info};
 
 /// What failed underneath `error`, which the client never sees, and where: the
 /// stack of the `DebugInfo` a handler attached.
@@ -38,7 +38,7 @@ type RequestId = Arc<dyn Fn(&RequestContext) -> Option<String> + Send + Sync>;
 /// call it was, into whatever span is current, so a server that opens one per
 /// request ties each line to its request.
 ///
-/// At the level [`log_level`] gives its code: ERROR for a
+/// At the level [`error_log_level`] gives its code: ERROR for a
 /// fault the request did not cause, WARN for a caller's mistake. The error's
 /// public message goes in as `reason`, its source, what actually failed, as
 /// `source`, and where as `stack`: the stack of its `google.rpc.DebugInfo`.
@@ -124,7 +124,7 @@ impl Interceptor for ErrorInterceptor {
         // own text, so the error's goes in as `reason`.
         let reason = error.message.as_deref().unwrap_or_default();
         let (source, stack) = causes(&error);
-        if log_level(error.code) == tracing::Level::ERROR {
+        if error_log_level(error.code) == tracing::Level::ERROR {
             tracing::error!(procedure, origin, code = ?error.code, reason, source, stack, "rpc failed");
         } else {
             tracing::warn!(procedure, origin, code = ?error.code, reason, source, stack, "rpc failed");
