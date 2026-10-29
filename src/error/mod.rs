@@ -211,10 +211,6 @@ pub const fn log_level(code: ErrorCode) -> tracing::Level {
 /// is built.
 #[must_use]
 pub fn status(error: &ConnectError) -> Status {
-    build_status(error)
-}
-
-fn build_status(error: &ConnectError) -> Status {
     Status {
         // Every gRPC code, 1 to 16, fits; 2 is Unknown.
         code: i32::try_from(error.code.grpc_code()).unwrap_or(2),
