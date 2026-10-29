@@ -740,6 +740,22 @@ pub struct ParseError {
 }
 
 impl ParseError {
+    /// Builds the error for `name`, which did not parse against `pattern` for
+    /// the reason `kind` gives.
+    ///
+    /// This is what a parser that does not go through
+    /// [`ResourcePattern::scan`] reports, such as the one generated for a
+    /// name, so that every parser fails with the same error. For
+    /// [`ParseErrorKind::InvalidId`], `name` is the id.
+    #[must_use]
+    pub fn new(pattern: impl Into<String>, name: impl Into<String>, kind: ParseErrorKind) -> Self {
+        Self {
+            pattern: pattern.into(),
+            name: name.into(),
+            kind,
+        }
+    }
+
     /// Returns the pattern the name was parsed against.
     #[must_use]
     pub fn pattern(&self) -> &str {
@@ -932,6 +948,16 @@ impl InvalidResourceIdError {
         Self {
             segment: Some(segment.to_owned()),
             kind: InvalidResourceIdErrorKind::Empty,
+        }
+    }
+
+    /// The error for a variable segment that contains the `/` separator, which
+    /// would split one segment into two.
+    #[must_use]
+    pub fn separator(segment: &str) -> Self {
+        Self {
+            segment: Some(segment.to_owned()),
+            kind: InvalidResourceIdErrorKind::Separator,
         }
     }
 
@@ -1236,6 +1262,27 @@ mod tests {
         assert_eq!(error.segment(), Some("book"));
         assert_eq!(error.kind(), &InvalidResourceIdErrorKind::Separator);
         assert_eq!(error.to_string(), "book: contains illegal character '/'");
+    }
+
+    #[test]
+    fn a_parse_error_can_be_built_by_a_parser_of_its_own() {
+        let built = ParseError::new(
+            "publishers/{publisher}/books/{book}",
+            "publishers/p1/books",
+            ParseErrorKind::SegmentCount { want: 4, got: 3 },
+        );
+        assert_eq!(built.pattern(), "publishers/{publisher}/books/{book}");
+        assert_eq!(built.name(), "publishers/p1/books");
+        assert_eq!(built, book().scan("publishers/p1/books").unwrap_err());
+    }
+
+    #[test]
+    fn a_segment_can_report_itself_with_a_separator() {
+        let error = InvalidResourceIdError::separator("book");
+        assert_eq!(error.segment(), Some("book"));
+        assert_eq!(error.kind(), &InvalidResourceIdErrorKind::Separator);
+        assert_eq!(error.to_string(), "book: contains illegal character '/'");
+        assert_eq!(error, validate_segment("book", "b/1").unwrap_err());
     }
 
     #[test]
