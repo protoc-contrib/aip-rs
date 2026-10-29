@@ -24,9 +24,9 @@ read `google.api.field_behavior` off a descriptor pool's fields as a
 `FieldBehaviorSet`:
 
 ```toml
-aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.11.0" }                                  # with the interceptor x-release-please-version
-aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.11.0", default-features = false }        # primitives only x-release-please-version
-aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.11.0", features = ["descriptor"] } # x-release-please-version
+aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.12.0" }                                  # with the interceptor x-release-please-version
+aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.12.0", default-features = false }        # primitives only x-release-please-version
+aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.12.0", features = ["descriptor"] } # x-release-please-version
 ```
 
 | AIP | Concept | Where it lives | |
@@ -290,7 +290,7 @@ generated code reads `aip::ResourceName`:
 
 ```toml
 [dependencies]
-aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.11.0" } # x-release-please-version
+aip = { package = "aip-rs", git = "https://github.com/protoc-contrib/aip-rs", tag = "v0.12.0" } # x-release-please-version
 ```
 
 Releases from 0.8.0 are git tags, not crates.io versions: the interceptor's

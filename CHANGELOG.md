@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.12.0](https://github.com/protoc-contrib/aip-rs/compare/v0.11.0...v0.12.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* FieldError<E> is FieldError, whose failure() is a boxed error and which has no into_failure; PrepareFailure, PrepareError, Reject and reject_prepare are removed; RequestPreparer::prepare returns Box<dyn Error + Send + Sync>; error::log_level is error_log_level; resource::WILDCARD is RESOURCE_WILDCARD.
+* ResourcePattern, CompileError, validate_resource_id, validate_segment, contains_wildcard, ResourceName::contains_wildcard, entry_status, InvalidResourceIdError and NoPatternError are removed; ParseError is renamed ResourceNameError, without kinds, and ResourceName::validate returns it; error::status is added.
+
+### Features
+
+* the AIP-193 error model and the prepare interceptor, as aip-go has them ([#42](https://github.com/protoc-contrib/aip-rs/issues/42)) ([1546c54](https://github.com/protoc-contrib/aip-rs/commit/1546c5484facc941527153d9b18bb44b6776e097))
+
+
+### Code Refactoring
+
+* aip-rs as aip-go is ([#45](https://github.com/protoc-contrib/aip-rs/issues/45)) ([34e9b4b](https://github.com/protoc-contrib/aip-rs/commit/34e9b4b940dbfab02c2f78c7f3c619f36b0a8120))
+* FieldError holds any error, and the surface follows aip-go's names ([#47](https://github.com/protoc-contrib/aip-rs/issues/47)) ([34b5a70](https://github.com/protoc-contrib/aip-rs/commit/34b5a70342f8c03817102226a1addf5684c791ba))
+
 ## [0.11.0](https://github.com/protoc-contrib/aip-rs/compare/v0.10.1...v0.11.0) (2026-10-19)
 
 
