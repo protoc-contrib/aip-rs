@@ -40,7 +40,7 @@ connectrpc = { version = "0.9", default-features = false, optional = true }
 futures-util = { version = "0.3", optional = true }
 # Behind `connect`: an error detail travels as base64 text in Connect, which a
 # batch entry's Status carries as bytes, and the interceptor reads back.
-base64 = { version = "0.22", optional = true }
+base64 = { version = "0.23", optional = true }
 # Behind `connect`: where ErrorInterceptor writes down a failed call.
 tracing = { version = "0.1", optional = true }
 # Its default `connect` feature is what renders violations as a Connect error.
