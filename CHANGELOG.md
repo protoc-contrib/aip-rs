@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/protoc-contrib/aip-rs/compare/v0.12.0...v0.12.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **ci:** merge with the App token so main gets its CI run ([#51](https://github.com/protoc-contrib/aip-rs/issues/51)) ([6f50559](https://github.com/protoc-contrib/aip-rs/commit/6f50559b581ab628f5f5e23e4a61f07c7bda671c))
+
 ## [0.12.0](https://github.com/protoc-contrib/aip-rs/compare/v0.11.0...v0.12.0) (2026-10-29)
 
 
